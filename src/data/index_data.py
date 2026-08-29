@@ -10,6 +10,7 @@ from src.data.nifty_indices import fetch_missing_indices
 
 
 MIN_OBSERVATIONS = 60
+YAHOO_TIMEOUT = 10
 
 
 def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
@@ -25,6 +26,7 @@ def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
         progress=False,
         group_by="column",
         threads=True,
+        timeout=YAHOO_TIMEOUT,
     )
     if data.empty:
         return pd.DataFrame()

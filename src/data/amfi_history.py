@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 
 AMFI_HISTORY_URL = "https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx"
-DEFAULT_TIMEOUT = 15
+DEFAULT_TIMEOUT = (5, 10)
 
 
 def _parse_history(text: str) -> pd.DataFrame:
@@ -41,22 +41,26 @@ def fetch_amfi_history(
     start: date,
     end: date,
     scheme_codes: Iterable[str] | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
-    chunk_days: int = 7,
+    timeout: tuple[float, float] = DEFAULT_TIMEOUT,
+    chunk_days: int = 365,
 ) -> pd.DataFrame:
-    """Fetch official AMFI historical NAVs in bounded date chunks."""
+    """Fetch official AMFI historical NAVs in bounded annual date chunks."""
     wanted = {str(code) for code in scheme_codes or []}
     chunks: list[pd.DataFrame] = []
     cursor = start
     while cursor <= end:
         chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
-        response = requests.get(
-            AMFI_HISTORY_URL,
-            params={"frmdt": cursor.strftime("%d-%b-%Y"), "todt": chunk_end.strftime("%d-%b-%Y")},
-            timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 Sector-Rotation/1.0"},
-        )
-        response.raise_for_status()
+        try:
+            response = requests.get(
+                AMFI_HISTORY_URL,
+                params={"frmdt": cursor.strftime("%d-%b-%Y"), "todt": chunk_end.strftime("%d-%b-%Y")},
+                timeout=timeout,
+                headers={"User-Agent": "Mozilla/5.0 Sector-Rotation/1.0"},
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            cursor = chunk_end + timedelta(days=1)
+            continue
         frame = _parse_history(response.text)
         if not frame.empty and wanted:
             frame = frame[frame["scheme_code"].isin(wanted)]

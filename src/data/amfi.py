@@ -6,11 +6,12 @@ import pandas as pd
 import requests
 
 AMFI_NAV_URL = "https://portal.amfiindia.com/spages/NAVAll.txt"
+DEFAULT_TIMEOUT = (5, 10)
 
 
 def fetch_amfi_nav(
     url: str = AMFI_NAV_URL,
-    timeout: int = 30,
+    timeout: tuple[float, float] = DEFAULT_TIMEOUT,
 ) -> pd.DataFrame:
     response = requests.get(
         url,
