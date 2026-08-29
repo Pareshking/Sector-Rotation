@@ -19,25 +19,33 @@ UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
 OUTPUT = ROOT / "data" / "processed"
 
 
-def build_fixture(registry: UniverseRegistry, days: int = 1300) -> tuple[pd.DataFrame, pd.Series]:
+def build_fixture(registry: UniverseRegistry, days: int = 1300) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
     rng = np.random.default_rng(42)
     dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=days)
     benchmark = pd.Series(100 * np.exp(np.cumsum(rng.normal(0.00035, 0.008, len(dates)))), index=dates, name=registry.benchmark_name)
     columns: dict[str, pd.Series] = {}
     for i, exposure in enumerate(registry.all()):
         drift = 0.00015 + (i % 7) * 0.00003
-        noise = rng.normal(drift, 0.011, len(dates))
-        columns[exposure.id] = pd.Series(100 * np.exp(np.cumsum(noise)), index=dates)
-    return pd.DataFrame(columns), benchmark
+        columns[exposure.id] = pd.Series(100 * np.exp(np.cumsum(rng.normal(drift, 0.011, len(dates)))), index=dates)
+    etf = _etf_frame(registry)
+    for i, row in etf.iterrows():
+        etf.loc[i, "fixture_price"] = 100 * np.exp(np.cumsum(rng.normal(0.0002 + (i % 5) * 0.00004, 0.012, len(dates))))[-1]
+    return pd.DataFrame(columns), benchmark, etf
 
 
-def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
-    benchmark = download_history([registry.benchmark_symbol], years=5).iloc[:, 0]
+def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.DataFrame]:
+    benchmark_frame = download_history([registry.benchmark_symbol], years=5)
+    if benchmark_frame.empty:
+        raise RuntimeError("Unable to download benchmark history")
+    benchmark = benchmark_frame.iloc[:, 0]
     symbols = {exposure.id: exposure.yfinance_symbol for exposure in registry.all() if exposure.yfinance_symbol}
     history = download_history(symbols.values(), years=5)
     reverse = {symbol: exposure_id for exposure_id, symbol in symbols.items()}
     history = history.rename(columns=reverse)
-    return history, benchmark, _etf_frame(registry)
+    etf_map = {etf.symbol: etf.yfinance_symbol for exposure in registry.all() for etf in exposure.etfs if etf.yfinance_symbol}
+    etf_history = download_history(etf_map.values(), years=5)
+    etf_history = etf_history.rename(columns={symbol: etf_symbol for etf_symbol, symbol in etf_map.items()})
+    return history, benchmark, _etf_frame(registry), etf_history
 
 
 def _etf_frame(registry: UniverseRegistry) -> pd.DataFrame:
@@ -54,10 +62,10 @@ def run(mode: str) -> None:
     if not report.valid:
         raise ValueError("Invalid universe: " + "; ".join(report.errors))
     if mode == "fixture":
-        prices, benchmark = build_fixture(registry)
-        etfs = _etf_frame(registry)
+        prices, benchmark, etfs = build_fixture(registry)
+        etf_history = pd.DataFrame()
     elif mode == "live":
-        prices, benchmark, etfs = build_live(registry)
+        prices, benchmark, etfs, etf_history = build_live(registry)
     else:
         raise ValueError("mode must be fixture or live")
     prices = prices.sort_index()
@@ -89,7 +97,8 @@ def run(mode: str) -> None:
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")
     write_parquet(rs_matrix, OUTPUT / "rs_matrix.parquet")
     write_parquet(etfs, OUTPUT / "etf_universe.parquet")
-    metadata = {"mode": mode, "benchmark": registry.benchmark_name, "generated_at": pd.Timestamp.utcnow().isoformat(), "observations": int(len(prices)), "exposures_with_history": int(prices.shape[1])}
+    write_parquet(etf_history, OUTPUT / "etf_prices.parquet")
+    metadata = {"mode": mode, "benchmark": registry.benchmark_name, "generated_at": pd.Timestamp.utcnow().isoformat(), "observations": int(len(prices)), "exposures_with_history": int(prices.shape[1]), "etf_series": int(etf_history.shape[1])}
     (OUTPUT / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(json.dumps(metadata))
 
