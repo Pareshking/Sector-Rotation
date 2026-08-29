@@ -33,7 +33,7 @@ TARGETS = {
     "commodities": "NIFTY COMMODITIES",
     "capital-markets": "NIFTY CAPITAL MARKETS",
     "services": "NIFTY SERVICES SECTOR",
-    "rural": "NIFTY INDIA RURAL",
+    "rural": "NIFTY RURAL",
     "mobility": "NIFTY EV & NEW AGE AUTOMOTIVE",
     "reit-invit": "NIFTY REITS & INVITS",
 }
@@ -57,7 +57,7 @@ def as_frame(rows: list[dict]) -> pd.DataFrame:
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    print(f"Jugaad-data version: 0.35.5", flush=True)
+    print("Jugaad-data version: 0.35.5", flush=True)
     print(f"Period: {START} -> {END}", flush=True)
 
     catalogue = index_name_list("Sectoral Indices", "Historical Index Data")
