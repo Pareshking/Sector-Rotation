@@ -11,6 +11,7 @@ from src.data.cache import cache_key, read_json_cache, write_json_cache
 
 BASE_URL = "https://api.mfapi.in/mf"
 DEFAULT_CACHE_DIR = Path("data") / ".cache" / "mfapi"
+DEFAULT_TIMEOUT = 15
 HEADERS = {"Accept": "application/json", "User-Agent": "Sector-Rotation/1.0"}
 
 
@@ -43,7 +44,7 @@ def _get_json(
 def search_schemes(
     query: str,
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
-    timeout: int = 20,
+    timeout: int = DEFAULT_TIMEOUT,
     cache_seconds: int = 86400,
 ) -> pd.DataFrame:
     """Search MFAPI schemes and return normalized scheme-code/name rows."""
@@ -93,19 +94,22 @@ def resolve_scheme_code(
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
 ) -> int | None:
     """Resolve an ETF to a numeric MFAPI scheme code without guessing."""
-    candidates = search_schemes(query, cache_dir=cache_dir)
+    candidates = search_schemes(query, cache_dir=cache_dir, timeout=DEFAULT_TIMEOUT)
     code = _best_candidate(candidates, expected_name or query)
     if code is not None:
         return code
     if expected_name and expected_name.casefold() != query.casefold():
-        return _best_candidate(search_schemes(expected_name, cache_dir=cache_dir), expected_name)
+        return _best_candidate(
+            search_schemes(expected_name, cache_dir=cache_dir, timeout=DEFAULT_TIMEOUT),
+            expected_name,
+        )
     return None
 
 
 def fetch_scheme_history(
     scheme_code: int,
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
     cache_seconds: int = 86400,
 ) -> MFAPIResult:
     """Fetch complete historical NAV data for a numeric AMFI scheme code."""
@@ -145,8 +149,13 @@ def fetch_etf_nav(
     scheme_code: int | None = None,
     expected_name: str | None = None,
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> MFAPIResult:
-    code = int(scheme_code) if scheme_code is not None else resolve_scheme_code(query, expected_name=expected_name, cache_dir=cache_dir)
+    code = (
+        int(scheme_code)
+        if scheme_code is not None
+        else resolve_scheme_code(query, expected_name=expected_name, cache_dir=cache_dir)
+    )
     if code is None:
         raise LookupError(f"MFAPI scheme code could not be resolved for {query!r}")
-    return fetch_scheme_history(code, cache_dir=cache_dir)
+    return fetch_scheme_history(code, cache_dir=cache_dir, timeout=timeout)
