@@ -16,6 +16,7 @@ HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
 HISTORICAL_URL = f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString"
 NSE_API_URL = "https://www.nseindia.com/api/historical/indicesHistory"
 NSE_ARCHIVE_URLS = ("https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv", "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv")
+ARCHIVE_FALLBACK_DAYS = 400
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json,text/plain,*/*", "Referer": "https://www.nseindia.com/", "Accept-Language": "en-US,en;q=0.9"}
 
@@ -174,7 +175,7 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
         if not api_frame.empty:
             frame = frame.join(api_frame, how="outer")
         if unresolved:
-            archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=365 * years + 10), end=date.today())
+            archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS), end=date.today())
             for exposure_id, index_name in unresolved.items():
                 if index_name in archive.columns and archive[index_name].dropna().size >= 60:
                     frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[index_name].rename(exposure_id), how="outer")
