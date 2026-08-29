@@ -1,61 +1,50 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
 
-from components.metrics import data_health_banner, load_metadata
+from app.components.charts import ranking_bar, rrg_quadrant
+from app.components.metrics import data_health_banner, get_metadata, metric_row
+from app.components.theme import inject_theme, page_header, section
+from app.data import load_etf_prices, load_etfs, load_rs, load_summary
 
-ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data" / "processed"
+st.set_page_config(page_title="India Sector Rotation", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+inject_theme()
 
-st.set_page_config(page_title="India Sector Rotation", page_icon="📊", layout="wide")
-
-
-def _mtime(name: str) -> int:
-    path = DATA_DIR / name
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
-
-@st.cache_data(show_spinner=False)
-def _read(name: str, modified_ns: int = 0) -> pd.DataFrame:
-    del modified_ns
-    path = DATA_DIR / name
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-def load_summary() -> pd.DataFrame:
-    return _read("summary_rankings.parquet", _mtime("summary_rankings.parquet"))
-
-
-def load_rs() -> pd.DataFrame:
-    return _read("rs_matrix.parquet", _mtime("rs_matrix.parquet"))
-
-
-def load_etfs() -> pd.DataFrame:
-    return _read("etf_universe.parquet", _mtime("etf_universe.parquet"))
-
-
-def load_etf_prices() -> pd.DataFrame:
-    return _read("etf_prices.parquet", _mtime("etf_prices.parquet"))
+# Re-export prepared-data loaders for backwards compatibility with notebooks/tests.
+__all__ = ["load_summary", "load_rs", "load_etfs", "load_etf_prices"]
 
 
 def main() -> None:
-    st.title("India Sector Rotation")
-    st.caption("Exposure-first quantitative view of Indian sectors and themes")
-    data_health_banner(load_metadata())
+    metadata = get_metadata()
     summary = load_summary()
+    page_header(
+        "Quantitative Research Terminal",
+        "India Sector Rotation",
+        "Exposure-first view of relative strength, momentum and implementation.",
+    )
+    data_health_banner(metadata)
     if summary.empty:
-        st.warning("Prepared data is not available yet. Run `python -m pipeline.run_pipeline --mode fixture` locally or trigger the GitHub data pipeline.")
+        st.warning("Prepared data is not available yet. Run the data pipeline first.")
         st.stop()
-    st.markdown("Use the pages in the sidebar to inspect sectors, themes, rankings and ETF implementations.")
-    st.dataframe(summary.sort_values("rank").head(10), use_container_width=True, hide_index=True)
+
+    metric_row(summary)
+
+    section("Market rotation")
+    left, right = st.columns([1.15, 1])
+    with left:
+        st.plotly_chart(rrg_quadrant(summary), width="stretch")
+    with right:
+        st.plotly_chart(ranking_bar(summary.head(12)), width="stretch")
+
+    section("Current leaderboard")
+    display_cols = [c for c in [
+        "rank", "exposure", "category", "stage", "momentum_z",
+        "return_1M", "return_3M", "return_6M", "return_12M", "data_source",
+    ] if c in summary.columns]
+    st.dataframe(summary.sort_values("rank")[display_cols].head(20), width="stretch", hide_index=True)
+
+    section("Research navigation")
+    st.caption("Use the sidebar to move from the overview into sector/theme heatmaps, rankings, ETF implementation and system lineage.")
 
 
 if __name__ == "__main__":
