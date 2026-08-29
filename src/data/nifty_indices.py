@@ -19,12 +19,8 @@ from src.data.cache import read_json_cache, write_json_cache
 
 BASE_URL = "https://www.niftyindices.com"
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
-PRICE_ENDPOINTS = (
-    f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString",
-)
-TRI_ENDPOINTS = (
-    f"{BASE_URL}/Backpage.aspx/getTotalReturnIndexString",
-)
+PRICE_ENDPOINTS = (f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString",)
+TRI_ENDPOINTS = (f"{BASE_URL}/Backpage.aspx/getTotalReturnIndexString",)
 TYPE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypedata1"
 SUBTYPE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypeSubindexdata"
 INDEX_CATALOGUE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypeindexdata"
@@ -54,7 +50,6 @@ NSE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Manual aliases are emergency fast-paths. The live NiftyIndices catalogue is authoritative.
 INDEX_NAME_ALIASES: dict[str, str] = {
     "telecom": "NIFTY TELECOMMUNICATIONS",
     "nifty telecom": "NIFTY TELECOMMUNICATIONS",
@@ -107,52 +102,35 @@ INDEX_NAME_ALIASES: dict[str, str] = {
     "nifty reits & invits": "NIFTY REITS & INVITS",
 }
 
-# Offline safety net for the current universe. This is not used instead of live
-# discovery; it is merged into the live catalogue so a temporary enumeration
-# outage cannot turn a known benchmark into a guessed ticker problem.
+INDEX_NAME_ALTERNATES: dict[str, tuple[str, ...]] = {
+    "healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
+    "nifty healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
+    "healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
+    "nifty healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
+}
+
 AUTHORITATIVE_CATALOGUE_SEED: tuple[tuple[str, str], ...] = (
-    ("NIFTY AUTO", "Sectoral Indices"),
-    ("NIFTY BANK", "Sectoral Indices"),
-    ("NIFTY FINANCIAL SERVICES", "Sectoral Indices"),
-    ("NIFTY FMCG", "Sectoral Indices"),
-    ("NIFTY IT", "Sectoral Indices"),
-    ("NIFTY MEDIA", "Sectoral Indices"),
-    ("NIFTY METAL", "Sectoral Indices"),
-    ("NIFTY PHARMA", "Sectoral Indices"),
-    ("NIFTY PRIVATE BANK", "Sectoral Indices"),
-    ("NIFTY PSU BANK", "Sectoral Indices"),
-    ("NIFTY REALTY", "Sectoral Indices"),
-    ("NIFTY CONSUMER DURABLES", "Sectoral Indices"),
-    ("NIFTY OIL & GAS", "Sectoral Indices"),
-    ("NIFTY HEALTHCARE", "Sectoral Indices"),
-    ("NIFTY FINANCIAL SERVICES EX-BANK", "Sectoral Indices"),
-    ("NIFTY CHEMICALS", "Sectoral Indices"),
-    ("NIFTY CEMENT", "Sectoral Indices"),
-    ("NIFTY TELECOMMUNICATIONS", "Sectoral Indices"),
-    ("NIFTY POWER", "Sectoral Indices"),
-    ("NIFTY NBFC", "Sectoral Indices"),
-    ("NIFTY CONSUMER SERVICES", "Sectoral Indices"),
-    ("NIFTY CAPITAL GOODS", "Sectoral Indices"),
-    ("NIFTY INDIA DEFENCE", "Thematic Indices"),
-    ("NIFTY EV & NEW AGE AUTOMOTIVE", "Thematic Indices"),
-    ("NIFTY INDIA MANUFACTURING", "Thematic Indices"),
-    ("NIFTY INFRASTRUCTURE", "Thematic Indices"),
-    ("NIFTY INDIA INFRASTRUCTURE & LOGISTICS", "Thematic Indices"),
-    ("NIFTY INDIA RAILWAYS PSU", "Thematic Indices"),
-    ("NIFTY INDIA CONSUMPTION", "Thematic Indices"),
-    ("NIFTY INDIA DIGITAL", "Thematic Indices"),
-    ("NIFTY INDIA INTERNET", "Thematic Indices"),
-    ("NIFTY INDIA TOURISM", "Thematic Indices"),
-    ("NIFTY ENERGY", "Thematic Indices"),
-    ("NIFTY COMMODITIES", "Thematic Indices"),
-    ("NIFTY CAPITAL MARKETS", "Thematic Indices"),
-    ("NIFTY MNC", "Thematic Indices"),
-    ("NIFTY PSE", "Thematic Indices"),
-    ("NIFTY CPSE", "Thematic Indices"),
-    ("NIFTY SERVICES SECTOR", "Thematic Indices"),
-    ("NIFTY RURAL", "Thematic Indices"),
-    ("NIFTY MOBILITY", "Thematic Indices"),
-    ("NIFTY REITS & INVITS", "Thematic Indices"),
+    ("NIFTY AUTO", "Sectoral Indices"), ("NIFTY BANK", "Sectoral Indices"),
+    ("NIFTY FINANCIAL SERVICES", "Sectoral Indices"), ("NIFTY FMCG", "Sectoral Indices"),
+    ("NIFTY IT", "Sectoral Indices"), ("NIFTY MEDIA", "Sectoral Indices"),
+    ("NIFTY METAL", "Sectoral Indices"), ("NIFTY PHARMA", "Sectoral Indices"),
+    ("NIFTY PRIVATE BANK", "Sectoral Indices"), ("NIFTY PSU BANK", "Sectoral Indices"),
+    ("NIFTY REALTY", "Sectoral Indices"), ("NIFTY CONSUMER DURABLES", "Sectoral Indices"),
+    ("NIFTY OIL & GAS", "Sectoral Indices"), ("NIFTY HEALTHCARE", "Sectoral Indices"),
+    ("NIFTY FINANCIAL SERVICES EX-BANK", "Sectoral Indices"), ("NIFTY CHEMICALS", "Sectoral Indices"),
+    ("NIFTY CEMENT", "Sectoral Indices"), ("NIFTY TELECOMMUNICATIONS", "Sectoral Indices"),
+    ("NIFTY POWER", "Sectoral Indices"), ("NIFTY NBFC", "Sectoral Indices"),
+    ("NIFTY CONSUMER SERVICES", "Sectoral Indices"), ("NIFTY CAPITAL GOODS", "Sectoral Indices"),
+    ("NIFTY INDIA DEFENCE", "Thematic Indices"), ("NIFTY EV & NEW AGE AUTOMOTIVE", "Thematic Indices"),
+    ("NIFTY INDIA MANUFACTURING", "Thematic Indices"), ("NIFTY INFRASTRUCTURE", "Thematic Indices"),
+    ("NIFTY INDIA INFRASTRUCTURE & LOGISTICS", "Thematic Indices"), ("NIFTY INDIA RAILWAYS PSU", "Thematic Indices"),
+    ("NIFTY INDIA CONSUMPTION", "Thematic Indices"), ("NIFTY INDIA DIGITAL", "Thematic Indices"),
+    ("NIFTY INDIA INTERNET", "Thematic Indices"), ("NIFTY INDIA TOURISM", "Thematic Indices"),
+    ("NIFTY ENERGY", "Thematic Indices"), ("NIFTY COMMODITIES", "Thematic Indices"),
+    ("NIFTY CAPITAL MARKETS", "Thematic Indices"), ("NIFTY MNC", "Thematic Indices"),
+    ("NIFTY PSE", "Thematic Indices"), ("NIFTY CPSE", "Thematic Indices"),
+    ("NIFTY SERVICES SECTOR", "Thematic Indices"), ("NIFTY RURAL", "Thematic Indices"),
+    ("NIFTY MOBILITY", "Thematic Indices"), ("NIFTY REITS & INVITS", "Thematic Indices"),
 )
 
 
@@ -219,11 +197,7 @@ def _merge_catalogues(*frames: pd.DataFrame) -> pd.DataFrame:
 def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.DataFrame:
     subtypes: list[str] = []
     try:
-        top = _post_json(
-            SUBTYPE_ENDPOINT,
-            {"cinfo": {"indextype": "Equity", "indexgroup": ""}},
-            timeout=timeout,
-        )
+        top = _post_json(SUBTYPE_ENDPOINT, {"cinfo": {"indextype": "Equity", "indexgroup": ""}}, timeout=timeout)
         for row in top:
             if isinstance(row, dict):
                 value = row.get("indextype") or row.get("indexType") or row.get("name")
@@ -232,8 +206,7 @@ def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.Dat
             elif isinstance(row, str) and row.strip():
                 subtypes.append(row.strip())
     except (requests.RequestException, ValueError, json.JSONDecodeError):
-        subtypes = []
-
+        pass
     if not subtypes:
         subtypes = ["Broad Market Indices", "Sectoral Indices", "Thematic Indices", "Strategy Indices"]
 
@@ -241,11 +214,7 @@ def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.Dat
     seen: set[str] = set()
     for subtype in dict.fromkeys(subtypes):
         try:
-            rows = _post_json(
-                INDEX_CATALOGUE_ENDPOINT,
-                {"cinfo": {"indextype": subtype, "indexgroup": "Equity"}},
-                timeout=timeout,
-            )
+            rows = _post_json(INDEX_CATALOGUE_ENDPOINT, {"cinfo": {"indextype": subtype, "indexgroup": "Equity"}}, timeout=timeout)
         except (requests.RequestException, ValueError, json.JSONDecodeError):
             rows = []
         for row in rows:
@@ -268,12 +237,7 @@ def _discover_index_catalogue_memory(timeout: int) -> pd.DataFrame:
     return _discover_index_catalogue_uncached(timeout=timeout)
 
 
-def discover_index_catalogue(
-    timeout: int = DEFAULT_TIMEOUT,
-    cache_seconds: int = CATALOGUE_CACHE_SECONDS,
-    force_refresh: bool = False,
-) -> pd.DataFrame:
-    """Return cached live catalogue merged with the authoritative universe seed."""
+def discover_index_catalogue(timeout: int = DEFAULT_TIMEOUT, cache_seconds: int = CATALOGUE_CACHE_SECONDS, force_refresh: bool = False) -> pd.DataFrame:
     if not force_refresh:
         cached = read_json_cache(CATALOGUE_CACHE_FILE, max_age_seconds=cache_seconds)
         if isinstance(cached, dict) and isinstance(cached.get("records"), list):
@@ -285,16 +249,12 @@ def discover_index_catalogue(
             return memory
     frame = _discover_index_catalogue_uncached(timeout=timeout)
     if not frame.empty:
-        write_json_cache(
-            {"updated_utc": pd.Timestamp.now(tz="UTC").isoformat(), "records": frame.to_dict(orient="records")},
-            CATALOGUE_CACHE_FILE,
-        )
+        write_json_cache({"updated_utc": pd.Timestamp.now(tz="UTC").isoformat(), "records": frame.to_dict(orient="records")}, CATALOGUE_CACHE_FILE)
         _discover_index_catalogue_memory.cache_clear()
     return frame
 
 
 def resolve_catalogue_name(name: str, catalogue: pd.DataFrame | None = None) -> str | None:
-    """Resolve a universe benchmark to the exact official catalogue spelling."""
     requested = _canonical_name(name)
     requested_norm = normalize_index_name(requested)
     alias_target = INDEX_NAME_ALIASES.get(str(name).strip().casefold())
@@ -328,11 +288,12 @@ def resolve_catalogue_name(name: str, catalogue: pd.DataFrame | None = None) -> 
 
 
 def resolve_index_names(name: str, catalogue: pd.DataFrame | None = None) -> list[str]:
-    candidates: list[str] = []
+    key = str(name).strip().casefold()
+    candidates: list[str] = list(INDEX_NAME_ALTERNATES.get(key, ()))
     resolved = resolve_catalogue_name(name, catalogue=catalogue)
     if resolved:
-        candidates.append(resolved)
-    alias_target = INDEX_NAME_ALIASES.get(str(name).strip().casefold())
+        candidates.insert(0, resolved)
+    alias_target = INDEX_NAME_ALIASES.get(key)
     if alias_target:
         candidates.append(alias_target)
     candidates.append(_canonical_name(name))
@@ -340,24 +301,11 @@ def resolve_index_names(name: str, catalogue: pd.DataFrame | None = None) -> lis
 
 
 def _make_session() -> cloudscraper.CloudScraper:
-    # The current NiftyIndices API accepts the browser-like POST without a
-    # bootstrap GET. Avoiding one page request per exposure is critical for a
-    # 40+ benchmark production run. A 403/5xx remains isolated to that index.
     return cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux", "mobile": False})
 
 
-def _request_endpoint(
-    endpoint_candidates: Sequence[str],
-    name: str,
-    start: date,
-    end: date,
-    timeout: int,
-) -> list[dict[str, object]]:
-    payload = {
-        "cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (
-            name, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), name
-        )
-    }
+def _request_endpoint(endpoint_candidates: Sequence[str], name: str, start: date, end: date, timeout: int) -> list[dict[str, object]]:
+    payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (name, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), name)}
     session = _make_session()
     last_error: Exception | None = None
     for endpoint in endpoint_candidates:
@@ -400,20 +348,10 @@ def _rows_to_series(name: str, rows: list[dict[str, object]], tri: bool = False)
 
 
 def _request_history(name: str, start: date, end: date, timeout: int, tri: bool) -> pd.Series:
-    rows = _request_endpoint(TRI_ENDPOINTS if tri else PRICE_ENDPOINTS, name, start, end, timeout)
-    return _rows_to_series(name, rows, tri=tri)
+    return _rows_to_series(name, _request_endpoint(TRI_ENDPOINTS if tri else PRICE_ENDPOINTS, name, start, end, timeout), tri=tri)
 
 
-def fetch_nifty_index_history(
-    name: str,
-    years: int = 5,
-    start: date | None = None,
-    end: date | None = None,
-    retries: int = 1,
-    timeout: int = DEFAULT_TIMEOUT,
-    catalogue: pd.DataFrame | None = None,
-) -> pd.Series:
-    """Fetch canonical history with TRI priority and price-index fallback."""
+def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 1, timeout: int = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
     end_date = end or date.today()
     start_date = start or (end_date - timedelta(days=365 * years + 10))
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)
@@ -439,13 +377,7 @@ def fetch_nifty_index_history(
     raise RuntimeError(f"Nifty Indices request failed for {name!r}: {last_error or 'no usable history'}")
 
 
-def fetch_nse_api_index_history(
-    name: str,
-    start: date,
-    end: date,
-    timeout: int = DEFAULT_TIMEOUT,
-    catalogue: pd.DataFrame | None = None,
-) -> pd.Series:
+def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
     session = requests.Session()
     try:
         session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
@@ -454,12 +386,7 @@ def fetch_nse_api_index_history(
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)
     for index_type in resolve_index_names(name, catalogue=catalogue_frame):
         try:
-            response = session.get(
-                NSE_API_URL,
-                params={"indexType": index_type, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")},
-                headers=NSE_HEADERS,
-                timeout=timeout,
-            )
+            response = session.get(NSE_API_URL, params={"indexType": index_type, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
             response.raise_for_status()
             payload = response.json()
             data = payload.get("data", {}) if isinstance(payload, dict) else {}
@@ -548,7 +475,6 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
 
 
 def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], existing: pd.DataFrame | None = None, years: int = 5) -> pd.DataFrame:
-    """Recover unresolved exposures independently through official fallbacks."""
     mapping = dict(names)
     frame = existing.copy() if existing is not None else pd.DataFrame()
     missing: dict[str, str] = {}
@@ -564,11 +490,7 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
         return exposure_id, index_name, series
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [
-            executor.submit(fetch_one, exposure_id, index_name)
-            for exposure_id, index_name in mapping.items()
-            if exposure_id not in frame.columns or frame[exposure_id].dropna().size < MIN_OBSERVATIONS
-        ]
+        futures = [executor.submit(fetch_one, exposure_id, index_name) for exposure_id, index_name in mapping.items() if exposure_id not in frame.columns or frame[exposure_id].dropna().size < MIN_OBSERVATIONS]
         for future in as_completed(futures):
             exposure_id, index_name, fetched = future.result()
             if fetched.dropna().size >= MIN_OBSERVATIONS:
@@ -579,22 +501,14 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
                 missing[exposure_id] = index_name
 
     if missing:
-        api_frame, unresolved = fetch_nse_api_indices(
-            missing,
-            start=date.today() - timedelta(days=365 * years + 10),
-            end=date.today(),
-        )
+        api_frame, unresolved = fetch_nse_api_indices(missing, start=date.today() - timedelta(days=365 * years + 10), end=date.today())
         if not api_frame.empty:
             frame = frame.join(api_frame, how="outer")
             for exposure_id in api_frame.columns:
                 source_by_exposure[exposure_id] = "nse_api"
                 resolved_by_exposure[exposure_id] = resolve_catalogue_name(mapping[exposure_id], catalogue=catalogue) or mapping[exposure_id]
         if unresolved:
-            archive = fetch_nse_archive_indices(
-                unresolved.values(),
-                start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS),
-                end=date.today(),
-            )
+            archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS), end=date.today())
             for exposure_id, index_name in unresolved.items():
                 candidates = resolve_index_names(index_name, catalogue=catalogue)
                 matched = next((candidate for candidate in candidates if candidate in archive.columns), None)
@@ -606,11 +520,7 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
     for exposure_id in mapping:
         if exposure_id in frame.columns and frame[exposure_id].dropna().size >= MIN_OBSERVATIONS:
             source_by_exposure.setdefault(exposure_id, "niftyindices")
-            resolved_by_exposure.setdefault(
-                exposure_id,
-                resolve_catalogue_name(mapping[exposure_id], catalogue=catalogue) or mapping[exposure_id],
-            )
-
+            resolved_by_exposure.setdefault(exposure_id, resolve_catalogue_name(mapping[exposure_id], catalogue=catalogue) or mapping[exposure_id])
     frame.attrs["source_by_exposure"] = source_by_exposure
     frame.attrs["resolved_name_by_exposure"] = resolved_by_exposure
     return frame.sort_index()
