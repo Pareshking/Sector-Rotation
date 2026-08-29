@@ -8,7 +8,6 @@ import yfinance as yf
 
 from src.data.nifty_indices import fetch_missing_indices
 
-
 MIN_OBSERVATIONS = 60
 YAHOO_TIMEOUT = 10
 
@@ -18,82 +17,35 @@ def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
     if not clean:
         return pd.DataFrame()
     start = date.today() - timedelta(days=365 * years + 10)
-    data = yf.download(
-        clean,
-        start=start.isoformat(),
-        end=(date.today() + timedelta(days=1)).isoformat(),
-        auto_adjust=True,
-        progress=False,
-        group_by="column",
-        threads=True,
-        timeout=YAHOO_TIMEOUT,
-    )
+    data = yf.download(clean, start=start.isoformat(), end=(date.today() + timedelta(days=1)).isoformat(), auto_adjust=True, progress=False, group_by="column", threads=True, timeout=YAHOO_TIMEOUT)
     if data.empty:
         return pd.DataFrame()
     if isinstance(data.columns, pd.MultiIndex):
-        close = (
-            data["Close"]
-            if "Close" in data.columns.get_level_values(0)
-            else data.xs("Close", axis=1, level=0)
-        )
+        close = data["Close"] if "Close" in data.columns.get_level_values(0) else data.xs("Close", axis=1, level=0)
     else:
         close = data[["Close"]].rename(columns={"Close": clean[0]})
     close.index = pd.to_datetime(close.index).tz_localize(None)
     return close.dropna(how="all").sort_index()
 
 
-def download_canonical_indices(
-    exposure_names: Mapping[str, str],
-    yfinance_symbols: Mapping[str, str | None],
-    years: int = 5,
-) -> pd.DataFrame:
-    """Build canonical index history with NiftyIndices-first source priority.
-
-    Source hierarchy:
-      1. Official NiftyIndices catalogue + TRI/PR history.
-      2. NSE historical API/archive recovery.
-      3. Yahoo Finance ticker fallback.
-    """
-    prices = fetch_missing_indices(exposure_names, years=years)
-
-    resolved = {
-        str(key): str(value)
-        for key, value in prices.attrs.get("resolved_name_by_exposure", {}).items()
-    }
-    sources = {
-        str(key): str(value)
-        for key, value in prices.attrs.get("source_by_exposure", {}).items()
-    }
-
-    unresolved = {
-        exposure_id: index_name
-        for exposure_id, index_name in exposure_names.items()
-        if exposure_id not in prices.columns
-        or prices[exposure_id].dropna().size < MIN_OBSERVATIONS
-    }
-
+def download_canonical_indices(exposure_names: Mapping[str, str], yfinance_symbols: Mapping[str, str | None], years: int = 5, etf_histories: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Resolve canonical benchmarks without inventing Yahoo symbols."""
+    prices = fetch_missing_indices(exposure_names, years=years, etf_histories=etf_histories)
+    resolved = dict(prices.attrs.get("resolved_name_by_exposure", {}))
+    sources = dict(prices.attrs.get("source_by_exposure", {}))
+    unresolved = {eid: name for eid, name in exposure_names.items() if eid not in prices.columns or prices[eid].dropna().size < MIN_OBSERVATIONS}
     if unresolved:
-        yahoo_symbols = {
-            exposure_id: yfinance_symbols.get(exposure_id)
-            for exposure_id in unresolved
-            if yfinance_symbols.get(exposure_id)
-        }
+        yahoo_symbols = {eid: yfinance_symbols.get(eid) for eid in unresolved if yfinance_symbols.get(eid)}
         if yahoo_symbols:
             market = download_history(yahoo_symbols.values(), years=years)
             if not market.empty:
-                for exposure_id, symbol in yahoo_symbols.items():
-                    if symbol not in market:
-                        continue
+                for eid, symbol in yahoo_symbols.items():
+                    if symbol not in market: continue
                     series = market[symbol].dropna()
-                    if series.size < MIN_OBSERVATIONS:
-                        continue
-                    prices = prices.drop(columns=[exposure_id], errors="ignore").join(
-                        series.rename(exposure_id),
-                        how="outer",
-                    )
-                    sources[exposure_id] = "yahoo"
-                    resolved[exposure_id] = exposure_names[exposure_id]
-
+                    if series.size < MIN_OBSERVATIONS: continue
+                    prices = prices.drop(columns=[eid], errors="ignore").join(series.rename(eid), how="outer")
+                    sources[eid] = "yahoo"; resolved[eid] = exposure_names[eid]
     prices.attrs["source_by_exposure"] = sources
     prices.attrs["resolved_name_by_exposure"] = resolved
+    prices.attrs["unresolved_exposures"] = [eid for eid in exposure_names if eid not in prices.columns or prices[eid].dropna().size < MIN_OBSERVATIONS]
     return prices.sort_index()
