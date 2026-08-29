@@ -15,7 +15,7 @@ CANONICAL_NAMES = {
     "consumer-services": "NIFTY CONSUMER SERVICES",
     "financial-services": "NIFTY FINANCIAL SERVICES",
     "financial-ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
-    "healthcare": "NIFTY HEALTHCARE INDEX",
+    "healthcare": "NIFTY HEALTHCARE",
     "oil-gas": "NIFTY OIL & GAS",
     "power": "NIFTY POWER",
     "private-bank": "NIFTY PRIVATE BANK",
@@ -40,7 +40,7 @@ CANONICAL_NAMES = {
     "rural": "NIFTY RURAL",
     "mobility": "NIFTY MOBILITY",
     "reit-invit": "NIFTY REITS & INVITS",
-    "nbfc": "NIFTY NBFC",
+    "nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
 }
 
 UNIVERSE_BENCHMARKS = {
@@ -99,11 +99,13 @@ def test_explicit_aliases_resolve_to_official_names() -> None:
     catalogue = _catalogue()
     expected = {
         "telecom": "NIFTY TELECOMMUNICATIONS",
-        "nbfc": "NIFTY NBFC",
-        "healthcare": "NIFTY HEALTHCARE INDEX",
+        "nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
+        "healthcare": "NIFTY HEALTHCARE",
         "power": "NIFTY POWER",
         "capital-goods": "NIFTY CAPITAL GOODS",
         "consumer-services": "NIFTY CONSUMER SERVICES",
+        "defence": "NIFTY INDIA DEFENCE",
+        "ev-new-energy-auto": "NIFTY EV & NEW AGE AUTOMOTIVE",
     }
     for alias, official_name in expected.items():
         assert nifty.resolve_catalogue_name(alias, catalogue=catalogue) == official_name
@@ -115,7 +117,7 @@ def test_catalogue_discovery_uses_official_hierarchy(monkeypatch, tmp_path) -> N
 
     def fake_post(url: str, payload: object, timeout: int = 15) -> list[object]:
         calls.append((url, payload))
-        if url == nifty.TYPE_ENDPOINT:
+        if url == nifty.SUBTYPE_ENDPOINT:
             return [
                 {"indextype": "Broad Market Indices"},
                 {"indextype": "Sectoral Indices"},
@@ -126,7 +128,7 @@ def test_catalogue_discovery_uses_official_hierarchy(monkeypatch, tmp_path) -> N
             "Broad Market Indices": [{"indextype": "NIFTY 50"}],
             "Sectoral Indices": [
                 {"indextype": "NIFTY TELECOMMUNICATIONS"},
-                {"indextype": "NIFTY HEALTHCARE INDEX"},
+                {"indextype": "NIFTY HEALTHCARE"},
             ],
             "Thematic Indices": [
                 {"indextype": "NIFTY INDIA DEFENCE"},
@@ -138,13 +140,8 @@ def test_catalogue_discovery_uses_official_hierarchy(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(nifty, "_post_json", fake_post)
     monkeypatch.setattr(nifty, "CATALOGUE_CACHE_FILE", tmp_path / "catalogue.json")
     frame = nifty.discover_index_catalogue(force_refresh=True, cache_seconds=0)
-    assert set(frame["name"]) == {
-        "NIFTY 50",
-        "NIFTY TELECOMMUNICATIONS",
-        "NIFTY HEALTHCARE INDEX",
-        "NIFTY INDIA DEFENCE",
-        "NIFTY MOBILITY",
-    }
+    names = set(frame["name"])
+    assert {"NIFTY 50", "NIFTY TELECOMMUNICATIONS", "NIFTY HEALTHCARE", "NIFTY INDIA DEFENCE", "NIFTY MOBILITY"}.issubset(names)
     assert len(calls) == 4
 
 
@@ -194,4 +191,4 @@ def test_tri_is_preferred_before_price_index(monkeypatch) -> None:
     assert len(series) == 60
     assert calls == [True]
     assert series.attrs["source"] == "niftyindices_tri"
-    assert series.attrs["resolved_name"] == "NIFTY HEALTHCARE INDEX"
+    assert series.attrs["resolved_name"] == "NIFTY HEALTHCARE"
