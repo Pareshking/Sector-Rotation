@@ -121,7 +121,7 @@ INDEX_NAME_ALTERNATES: dict[str, tuple[str, ...]] = {
 YAHOO_INDEX_SYMBOLS: dict[str, str] = {
     "auto": "^CNXAUTO",
     "bank": "^NSEBANK",
-    "financial-services": "^CNXFINANCE",
+    "financial-services": "NIFTY_FIN_SERVICE.NS",
     "fmcg": "^CNXFMCG",
     "it": "^CNXIT",
     "media": "^CNXMEDIA",
