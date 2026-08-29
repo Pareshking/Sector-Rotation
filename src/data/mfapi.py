@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -57,21 +56,31 @@ def search_schemes(query: str, cache_dir: str | Path = DEFAULT_CACHE_DIR, timeou
     return pd.DataFrame(normalized).drop_duplicates("scheme_code")
 
 
+def _best_candidate(candidates: pd.DataFrame, target: str) -> int | None:
+    if candidates.empty:
+        return None
+    target_cf = target.casefold().strip()
+    exact = candidates[candidates["scheme_name"].str.casefold().eq(target_cf)]
+    if not exact.empty:
+        return int(exact.iloc[0]["scheme_code"])
+    tokens = [token for token in target_cf.replace("-", " ").split() if len(token) > 2]
+    if not tokens:
+        return None
+    scored = candidates.assign(_score=candidates["scheme_name"].str.casefold().map(lambda value: sum(token in value for token in tokens)))
+    best = scored.sort_values(["_score", "scheme_code"], ascending=[False, True]).iloc[0]
+    threshold = max(1, len(tokens) // 2)
+    return int(best["scheme_code"]) if int(best["_score"]) >= threshold else None
+
+
 def resolve_scheme_code(query: str, expected_name: str | None = None, cache_dir: str | Path = DEFAULT_CACHE_DIR) -> int | None:
     """Resolve an ETF to a numeric MFAPI scheme code without guessing."""
     candidates = search_schemes(query, cache_dir=cache_dir)
-    if candidates.empty and expected_name and expected_name.lower() != query.lower():
-        candidates = search_schemes(expected_name, cache_dir=cache_dir)
-    if candidates.empty:
-        return None
-    target = (expected_name or query).casefold()
-    exact = candidates[candidates["scheme_name"].str.casefold().eq(target)]
-    if not exact.empty:
-        return int(exact.iloc[0]["scheme_code"])
-    tokens = [token for token in target.replace("-", " ").split() if len(token) > 2]
-    scored = candidates.assign(_score=candidates["scheme_name"].str.casefold().map(lambda value: sum(token in value for token in tokens)))
-    best = scored.sort_values(["_score", "scheme_code"], ascending=[False, True]).iloc[0]
-    return int(best["scheme_code"]) if int(best["_score"]) >= max(1, len(tokens) // 2) else None
+    code = _best_candidate(candidates, expected_name or query)
+    if code is not None:
+        return code
+    if expected_name and expected_name.casefold() != query.casefold():
+        return _best_candidate(search_schemes(expected_name, cache_dir=cache_dir), expected_name)
+    return None
 
 
 def fetch_scheme_history(scheme_code: int, cache_dir: str | Path = DEFAULT_CACHE_DIR, timeout: int = 30, cache_seconds: int = 86400) -> MFAPIResult:
