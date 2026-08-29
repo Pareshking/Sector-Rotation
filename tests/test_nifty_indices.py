@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import date
 
 import pandas as pd
@@ -81,12 +79,10 @@ UNIVERSE_BENCHMARKS = {
 
 
 def _catalogue() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "name": list(CANONICAL_NAMES.values()),
-            "category": ["Sectoral Indices"] * 13 + ["Thematic Indices"] * 20,
-        }
-    )
+    return pd.DataFrame({
+        "name": list(CANONICAL_NAMES.values()),
+        "category": ["Sectoral Indices"] * 13 + ["Thematic Indices"] * 20,
+    })
 
 
 def test_catalogue_resolution_covers_all_currently_problematic_exposures() -> None:
@@ -118,22 +114,12 @@ def test_catalogue_discovery_uses_official_hierarchy(monkeypatch, tmp_path) -> N
     def fake_post(url: str, payload: object, timeout: int = 15) -> list[object]:
         calls.append((url, payload))
         if url == nifty.SUBTYPE_ENDPOINT:
-            return [
-                {"indextype": "Broad Market Indices"},
-                {"indextype": "Sectoral Indices"},
-                {"indextype": "Thematic Indices"},
-            ]
+            return [{"indextype": "Broad Market Indices"}, {"indextype": "Sectoral Indices"}, {"indextype": "Thematic Indices"}]
         subtype = payload["cinfo"]["indextype"]
         names = {
             "Broad Market Indices": [{"indextype": "NIFTY 50"}],
-            "Sectoral Indices": [
-                {"indextype": "NIFTY TELECOMMUNICATIONS"},
-                {"indextype": "NIFTY HEALTHCARE"},
-            ],
-            "Thematic Indices": [
-                {"indextype": "NIFTY INDIA DEFENCE"},
-                {"indextype": "NIFTY MOBILITY"},
-            ],
+            "Sectoral Indices": [{"indextype": "NIFTY TELECOMMUNICATIONS"}, {"indextype": "NIFTY HEALTHCARE"}],
+            "Thematic Indices": [{"indextype": "NIFTY INDIA DEFENCE"}, {"indextype": "NIFTY MOBILITY"}],
         }
         return names.get(subtype, [])
 
@@ -147,10 +133,7 @@ def test_catalogue_discovery_uses_official_hierarchy(monkeypatch, tmp_path) -> N
 
 def test_historical_parser_accepts_90_consecutive_rows() -> None:
     dates = pd.bdate_range("2026-01-02", periods=90)
-    rows = [
-        {"HistoricalDate": timestamp.strftime("%d %b %Y"), "CLOSE": f"{1000 + i:.2f}"}
-        for i, timestamp in enumerate(dates)
-    ]
+    rows = [{"HistoricalDate": timestamp.strftime("%d %b %Y"), "CLOSE": f"{1000 + i:.2f}"} for i, timestamp in enumerate(dates)]
     series = nifty._rows_to_series("NIFTY CAPITAL GOODS", rows)
     assert len(series) == 90
     assert series.index.is_monotonic_increasing
@@ -160,10 +143,7 @@ def test_historical_parser_accepts_90_consecutive_rows() -> None:
 
 
 def test_tri_parser_uses_total_return_index_column() -> None:
-    rows = [
-        {"Date": "02 Jan 2026", "TotalReturnsIndex": "100.00"},
-        {"Date": "05 Jan 2026", "TotalReturnsIndex": "101.50"},
-    ]
+    rows = [{"Date": "02 Jan 2026", "TotalReturnsIndex": "100.00"}, {"Date": "05 Jan 2026", "TotalReturnsIndex": "101.50"}]
     series = nifty._rows_to_series("NIFTY TELECOMMUNICATIONS", rows, tri=True)
     assert series.tolist() == [100.0, 101.5]
 
@@ -173,22 +153,28 @@ def test_tri_is_preferred_before_price_index(monkeypatch) -> None:
 
     def fake_request_history(name: str, start: date, end: date, timeout: int, tri: bool) -> pd.Series:
         calls.append(tri)
-        return pd.Series(
-            range(60),
-            index=pd.bdate_range("2026-01-01", periods=60),
-            dtype="float64",
-            name=name,
-        )
+        return pd.Series(range(60), index=pd.bdate_range("2026-01-01", periods=60), dtype="float64", name=name)
 
     monkeypatch.setattr(nifty, "_request_history", fake_request_history)
-    series = nifty.fetch_nifty_index_history(
-        "healthcare",
-        start=date(2026, 1, 1),
-        end=date(2026, 4, 1),
-        retries=1,
-        catalogue=_catalogue(),
-    )
+    series = nifty.fetch_nifty_index_history("healthcare", start=date(2026, 1, 1), end=date(2026, 4, 1), retries=1, catalogue=_catalogue())
     assert len(series) == 60
     assert calls == [True]
     assert series.attrs["source"] == "niftyindices_tri"
     assert series.attrs["resolved_name"] == "NIFTY HEALTHCARE"
+
+
+def test_missing_canonical_history_is_not_replaced_by_etf_or_benchmark_proxy(monkeypatch) -> None:
+    empty = pd.Series(dtype="float64")
+    monkeypatch.setattr(nifty, "discover_index_catalogue", lambda *args, **kwargs: _catalogue())
+    monkeypatch.setattr(nifty, "fetch_nifty_index_history", lambda *args, **kwargs: empty)
+    monkeypatch.setattr(nifty, "fetch_nse_api_indices", lambda *args, **kwargs: (pd.DataFrame(), {}))
+    monkeypatch.setattr(nifty, "fetch_nse_archive_indices", lambda *args, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(nifty, "_fetch_yahoo_fallback", lambda *args, **kwargs: (pd.DataFrame(), {}))
+    monkeypatch.setattr(nifty, "_load_seed_indices", lambda *args, **kwargs: (pd.DataFrame(), {}))
+    prices = nifty.fetch_missing_indices(
+        {"capital-goods": "NIFTY CAPITAL GOODS", "cement": "NIFTY CEMENT"},
+        existing=pd.DataFrame(),
+        etf_histories=pd.DataFrame({"AUTOBEES": range(100)}),
+    )
+    assert prices.empty
+    assert prices.attrs["unresolved_exposures"] == ["capital-goods", "cement"]
