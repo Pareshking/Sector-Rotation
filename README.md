@@ -5,14 +5,14 @@ Exposure-first quantitative sector and thematic rotation research for Indian equ
 ## Architecture
 
 ```text
-NSE Indices / Yahoo / AMFI
+NSE Indices / Jugaad NSE adapter / AMFI / ETF sources
           |
           v
 Universe Registry -> Exposure -> canonical Nifty benchmark
           |
-          +--> authoritative NiftyIndices fallback
-          +--> ETF NSE symbol aliases
-          +--> AMFI historical NAV fallback
+          +--> direct NiftyIndices/NSE history
+          +--> Jugaad-data NSE/NiftyIndices retrieval adapter
+          +--> explicitly matched ETF/NAV fallback
           |
           v
 Quantitative engine
@@ -31,11 +31,13 @@ Streamlit UI (read-only)
 
 ## Data hierarchy
 
-**Canonical index benchmarks:** Yahoo Finance is the fast path; the official NSE Indices historical-data service at `niftyindices.com` is the authoritative fallback when Yahoo is missing or invalid. The official site exposes historical index data and identifies NSE Indices Limited as the publisher. 
+**Canonical index benchmarks:** the pipeline first attempts direct NiftyIndices/NSE historical data. If the direct endpoint is unavailable, the Jugaad-data NSE/NiftyIndices adapter is used to retrieve the same named NSE index history. This is a retrieval adapter, **not a synthetic or category proxy**. If those routes do not provide a decision-grade series, the resolver may use an explicitly matched ETF/NAV series for the same exposure. Generic Yahoo index symbols are deliberately not used as canonical sector/thematic proxies.
+
+**Decision gate:** a canonical history needs at least **250 observations** before it is eligible for the Mansfield 52-week and 12-month decision calculations. Histories below that threshold are excluded from decision signals rather than padded or substituted.
 
 **ETF market prices:** configured NSE trading symbols are used as the canonical ETF identifiers. Yahoo Finance `.NS` symbols are adapters, not authoritative ticker definitions. Legacy NSE ticker changes are retained as aliases where verified.
 
-**ETF NAV fallback:** AMFI's official historical NAV endpoint is available for bounded date-range backfills. The adapter chunks requests so illiquid or unsupported Yahoo ETF series can be recovered without fabricating prices.
+**ETF NAV fallback:** AMFI historical NAV data can recover explicitly mapped ETF/fund histories when market-price retrieval is unavailable. ETF/NAV data may be promoted to canonical decision input only when the mapping is explicitly exposure-matched; nearest-category substitution is prohibited.
 
 The Streamlit application never performs bulk historical downloads. It reads prepared files from `data/processed/` only.
 
@@ -76,91 +78,3 @@ Then use the 52-week rolling mean baseline:
 `MRS_t = 100 * (RS_t / SMA(RS_t, 52) - 1)`
 
 RS momentum is the 13-week change in MRS.
-
-### Stage
-
-The RRG-style stage uses:
-
-- **Leading:** RS ratio >= 1 and momentum >= 0
-- **Weakening:** RS ratio >= 1 and momentum < 0
-- **Lagging:** RS ratio < 1 and momentum < 0
-- **Improving:** RS ratio < 1 and momentum >= 0
-
-## Data health telemetry
-
-Every live pipeline run writes `data/processed/metadata.json` with:
-
-- UTC update timestamp
-- total canonical exposures
-- valid canonical series
-- skipped canonical series
-- canonical coverage ratio
-- fallback exposures using Nifty Indices
-- exposures missing Yahoo symbols
-- ETF series count
-- ETF symbols still skipped after AMFI fallback
-
-The Streamlit overview displays this health state before the analytical content.
-
-## Local setup
-
-Python 3.12 is recommended.
-
-```bash
-git clone https://github.com/Pareshking/Sector-Rotation.git
-cd Sector-Rotation
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Windows PowerShell:
-
-```powershell
-.venv\\Scripts\\Activate.ps1
-```
-
-## Fixture mode
-
-Generate a deterministic offline dataset:
-
-```bash
-python -m pipeline.run_pipeline --mode fixture
-pytest -q
-```
-
-## Live mode
-
-```bash
-python -m pipeline.run_pipeline --mode live
-```
-
-Live mode fails closed if canonical coverage is below 100%. It does not silently publish an incomplete canonical universe.
-
-A five-year window is requested where the authoritative source has sufficient history. For newly created indices, "100% coverage" means every configured canonical index has a valid authoritative series, not that a newly launched index is incorrectly backfilled before its actual inception date.
-
-## GitHub Actions
-
-`.github/workflows/data_pipeline.yml` runs on main updates, manually, and on weekdays. It builds the live dataset and commits changed `data/processed/` artifacts. The `paths-ignore` rule prevents generated-data commits from recursively launching another pipeline run.
-
-## Streamlit Community Cloud
-
-Use `app/streamlit_app.py` as the application entrypoint and the root `requirements.txt` for dependencies. The app does not require API secrets for the public prepared dataset and performs no historical bulk downloads at page load.
-
-## Data limitations
-
-1. ETF traded-price history is not identical to ETF NAV history.
-2. A newly launched ETF cannot legitimately provide five years of traded history.
-3. Newly launched Nifty indices may have shorter authoritative histories.
-4. Missing AUM, expense ratio, liquidity and tracking-error values remain null rather than being invented.
-5. Survivorship and index-reconstitution effects must be considered before using historical rankings for backtests.
-
-## Development principles
-
-- No live downloads from Streamlit pages.
-- No ETF treated as the canonical sector/theme.
-- No fabricated historical observations.
-- Missing data is explicit and testable.
-- Official Nifty index data is the fallback authority for canonical benchmarks.
-- Quantitative calculations remain independent of the UI.
-- Production datasets are generated by the pipeline and stored as compressed Parquet.
