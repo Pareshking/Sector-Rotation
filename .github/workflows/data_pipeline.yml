@@ -1,6 +1,10 @@
 name: Data Pipeline
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "data/processed/**"
   workflow_dispatch:
   schedule:
     - cron: "30 12 * * 1-5"
@@ -35,5 +39,7 @@ jobs:
             echo "No data changes to commit."
           else
             git commit -m "data: refresh sector rotation dataset"
-            git push
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
           fi
