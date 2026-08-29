@@ -81,7 +81,8 @@ def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.
     }
     source_counts["nse"] = source_counts["niftyindices_tri"] + source_counts["niftyindices_pr"] + source_counts["nse_api"] + source_counts["nse_archive"]
     etf_total = len(etf_objects)
-    etf_valid = sum(symbol in etf_history and etf_history[symbol].dropna().size >= 20 for symbol in (etf.symbol for etf in etf_objects if etf.symbol))
+    etf_keys = [etf.symbol or etf.name for etf in etf_objects]
+    etf_valid = sum(key in etf_history and etf_history[key].dropna().size >= 20 for key in etf_keys)
     health = {
         "total_canonical_exposures": len(registry.all()),
         "valid_canonical_series": len(valid_exposures),
@@ -96,7 +97,7 @@ def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.
         "etf_total": etf_total,
         "etf_valid_series": etf_valid,
         "etf_coverage_ratio": etf_valid / max(etf_total, 1),
-        "etf_skipped_symbols": [etf.symbol for etf in etf_objects if etf.symbol and (etf.symbol not in etf_history or etf_history[etf.symbol].dropna().size < 20)],
+        "etf_skipped_symbols": [key for key in etf_keys if key not in etf_history or etf_history[key].dropna().size < 20],
         "etf_source_by_symbol": etf_sources,
         "resolved_mfapi_scheme_codes": resolved_codes,
     }
