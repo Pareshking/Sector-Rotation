@@ -2,6 +2,11 @@ name: Jugaad NSE Catalogue Only
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tools/catalogue_only.py"
+      - ".github/workflows/jugaad-catalogue-only.yml"
 
 jobs:
   catalogue:
