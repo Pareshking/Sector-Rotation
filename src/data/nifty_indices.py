@@ -12,7 +12,10 @@ import requests
 BASE_URL = "https://www.niftyindices.com"
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
 HISTORICAL_URL = f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString"
-NSE_ARCHIVE_URL = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv"
+NSE_ARCHIVE_URLS = (
+    "https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv",
+    "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv",
+)
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "text/csv,*/*;q=0.8", "Referer": "https://www.nseindia.com/"}
 
@@ -68,18 +71,31 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
     raise RuntimeError(f"Nifty Indices request failed for {name!r}: {last_error}") from last_error
 
 
-def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 30) -> pd.DataFrame:
+def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 10) -> pd.DataFrame:
     """Backfill requested indices from NSE's daily multi-index archive."""
     wanted = {_canonical_name(name): name for name in names}
     if not wanted:
         return pd.DataFrame()
+    session = requests.Session()
+    try:
+        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
+    except requests.RequestException:
+        pass
     rows: list[pd.DataFrame] = []
     for day in pd.bdate_range(start=start, end=end):
-        try:
-            response = requests.get(NSE_ARCHIVE_URL.format(date=day.strftime("%d%m%Y")), headers=NSE_HEADERS, timeout=timeout)
-            if response.status_code != 200 or len(response.content) < 300:
+        content: bytes | None = None
+        for template in NSE_ARCHIVE_URLS:
+            try:
+                response = session.get(template.format(date=day.strftime("%d%m%Y")), headers=NSE_HEADERS, timeout=timeout)
+                if response.status_code == 200 and len(response.content) >= 300:
+                    content = response.content
+                    break
+            except requests.RequestException:
                 continue
-            frame = pd.read_csv(StringIO(response.content.decode("utf-8", errors="replace")))
+        if content is None:
+            continue
+        try:
+            frame = pd.read_csv(StringIO(content.decode("utf-8", errors="replace")))
             if "Index Name" not in frame.columns or "Closing Index Value" not in frame.columns:
                 continue
             frame["_canonical"] = frame["Index Name"].astype(str).map(_canonical_name)
@@ -89,7 +105,7 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
             selected["date"] = pd.to_datetime(selected["Index Date"], dayfirst=True, errors="coerce")
             selected["close"] = pd.to_numeric(selected["Closing Index Value"], errors="coerce")
             rows.append(selected.dropna(subset=["date", "close"])[["_canonical", "date", "close"]])
-        except (requests.RequestException, UnicodeDecodeError, ValueError, pd.errors.ParserError):
+        except (UnicodeDecodeError, ValueError, pd.errors.ParserError):
             continue
     if not rows:
         return pd.DataFrame()
