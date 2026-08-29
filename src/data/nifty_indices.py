@@ -75,7 +75,6 @@ INDEX_NAME_ALIASES = {
 }
 INDEX_NAME_ALTERNATES = {"healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"), "nifty healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"), "healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"), "nifty healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX")}
 
-# Only established Yahoo index symbols are permitted. Never manufacture NIFTY_<NAME>.NS.
 VALID_YAHOO_INDEX_SYMBOLS = {"nifty50": "^NSEI", "niftybank": "^NSEBANK", "bank": "^NSEBANK", "it": "^CNXIT", "auto": "^CNXAUTO"}
 YAHOO_INDEX_SYMBOLS = VALID_YAHOO_INDEX_SYMBOLS
 
@@ -352,7 +351,7 @@ ETF_PROXY_KEYS = {
 
 
 def _proxy_from_etfs(missing, etf_histories):
-    if not etf_histories: return pd.DataFrame(), {}
+    if etf_histories is None or (isinstance(etf_histories, pd.DataFrame) and etf_histories.empty) or (isinstance(etf_histories, dict) and not etf_histories): return pd.DataFrame(), {}
     result, source = {}, {}
     for exposure_id in missing:
         for key in ETF_PROXY_KEYS.get(exposure_id, ()):
