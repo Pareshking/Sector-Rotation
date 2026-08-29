@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "benchmark": {"name": "Nifty 50", "yfinance_symbol": "^NSEI", "source": "NSE Indices"},
   "exposures": [
     {"id":"auto","name":"Automobile","category":"sector","benchmark":"Nifty Auto","yfinance_symbol":"^CNXAUTO","etfs":[{"symbol":"AUTOBEES","name":"Nippon India Nifty Auto ETF","scheme_code":149465,"yfinance_symbol":"AUTOBEES.NS","exchange":"NSE"},{"symbol":"AUTOIETF","name":"ICICI Prudential Nifty Auto ETF","scheme_code":149463,"yfinance_symbol":"AUTOIETF.NS","exchange":"NSE"}]},
@@ -43,6 +43,7 @@
     {"id":"services","name":"Services","category":"thematic","benchmark":"Nifty Services Sector","yfinance_symbol":null,"etfs":[]},
     {"id":"rural","name":"Rural","category":"thematic","benchmark":"Nifty Rural","yfinance_symbol":null,"etfs":[]},
     {"id":"mobility","name":"Mobility","category":"thematic","benchmark":"Nifty Mobility","yfinance_symbol":null,"etfs":[]},
+    {"id":"sugar-ethanol","name":"Sugar & Ethanol","category":"thematic","benchmark":"Nifty Sugar & Ethanol","yfinance_symbol":null,"etfs":[]},
     {"id":"reit-invit","name":"REITs & InvITs","category":"thematic","benchmark":"Nifty REITs & InvITs","yfinance_symbol":null,"etfs":[]}
   ]
 }
