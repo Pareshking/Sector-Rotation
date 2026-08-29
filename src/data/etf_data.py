@@ -78,6 +78,9 @@ def fetch_all_mfapi_histories(
     resolved_codes: dict[str, int] = {}
     unresolved: list[ETFMapping] = []
 
+    if not scheme_records:
+        return columns, resolved_codes, unresolved
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_fetch_one_mfapi, etf): etf for etf in scheme_records}
         for future in as_completed(futures):
@@ -125,23 +128,24 @@ def fetch_etf_histories(
     unresolved.extend(direct_yahoo)
 
     # Secondary market-price leg: only instruments without a complete MFAPI
-    # series reach Yahoo. This prevents unnecessary calls for mapped schemes.
+    # series reach Yahoo. Never invoke the downloader for an empty candidate set.
     market_symbols = [etf.yfinance_symbol for etf in unresolved if etf.yfinance_symbol]
-    market = download_market_history(market_symbols, years=years)
-    if not market.empty:
-        reverse = {
-            etf.yfinance_symbol: etf.symbol or etf.name
-            for etf in unresolved
-            if etf.yfinance_symbol
-        }
-        for yahoo_symbol, etf_key in reverse.items():
-            if yahoo_symbol not in market:
-                continue
-            series = market[yahoo_symbol].dropna()
-            if series.size < MIN_OBSERVATIONS:
-                continue
-            columns[etf_key] = series.rename(etf_key)
-            sources[etf_key] = "yahoo"
+    if market_symbols:
+        market = download_market_history(market_symbols, years=years)
+        if not market.empty:
+            reverse = {
+                etf.yfinance_symbol: etf.symbol or etf.name
+                for etf in unresolved
+                if etf.yfinance_symbol
+            }
+            for yahoo_symbol, etf_key in reverse.items():
+                if yahoo_symbol not in market:
+                    continue
+                series = market[yahoo_symbol].dropna()
+                if series.size < MIN_OBSERVATIONS:
+                    continue
+                columns[etf_key] = series.rename(etf_key)
+                sources[etf_key] = "yahoo"
 
     # Emergency official AMFI history for anything still unresolved. This path
     # is intentionally last so it cannot cause broad Yahoo/MFAPI duplication.
