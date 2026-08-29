@@ -19,7 +19,40 @@ ROOT = Path(__file__).resolve().parents[1]
 UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
 OUTPUT = ROOT / "data" / "processed"
 
-AUTHORITATIVE_CANONICAL_SOURCES = {"niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive"}
+# Official Nifty/NSE histories remain first priority. Explicitly matched ETF/NAV
+# histories are also decision-grade canonical benchmarks when the official web
+# history is unavailable. They are not inferred by similarity or category.
+AUTHORITATIVE_CANONICAL_SOURCES = {
+    "niftyindices_tri",
+    "niftyindices_pr",
+    "nse_api",
+    "nse_archive",
+    "etf_nav_authoritative",
+}
+
+# Deliberately explicit: every mapping was selected because the ETF tracks the
+# same sector/thematic exposure. Never replace this with a nearest-symbol or
+# nearest-category heuristic (e.g. Auto must never stand in for Capital Goods).
+PRIMARY_CANONICAL_ETF_BY_EXPOSURE = {
+    "auto": "AUTOBEES",
+    "bank": "BANKBEES",
+    "financial-services": "BFSI",
+    "fmcg": "FMCGIETF",
+    "healthcare": "HEALTHIETF",
+    "it": "ITBEES",
+    "metal": "METALIETF",
+    "pharma": "PHARMABEES",
+    "psu-bank": "PSUBNKBEES",
+    "defence": "GROWWDEFNC",
+    "ev-new-energy-auto": "EVINDIA",
+    "manufacturing": "MAKEINDIA",
+    "infrastructure": "INFRABEES",
+    "consumption": "CONSUMBEES",
+    "internet": "GROWWNET",
+    "mnc": "MNC",
+    "pse": "MOPSE",
+    "cpse": "CPSEETF",
+}
 
 
 def build_fixture(registry, days=1300):
@@ -37,7 +70,7 @@ def build_fixture(registry, days=1300):
         "fallback_canonical_exposures": [],
         "skipped_canonical_exposures": [],
         "missing_yfinance_symbols": [],
-        "source_counts": {"nse": len(registry.all()), "niftyindices_tri": len(registry.all()), "niftyindices_pr": 0, "yahoo": 0, "mfapi": int(etf_prices.shape[1]), "amfi": 0},
+        "source_counts": {"nse": len(registry.all()), "niftyindices_tri": len(registry.all()), "niftyindices_pr": 0, "nse_api": 0, "nse_archive": 0, "etf_nav_authoritative": 0, "yahoo": 0, "mfapi": int(etf_prices.shape[1]), "amfi": 0},
         "source_by_canonical_exposure": {e.id: "niftyindices_tri" for e in registry.all()},
         "etf_total": int(etf_prices.shape[1]),
         "etf_valid_series": int(etf_prices.shape[1]),
@@ -60,13 +93,19 @@ def build_live(registry):
     exposure_names = {e.id: e.benchmark for e in registry.all()}
     etf_objects = [etf for e in registry.all() for etf in e.etfs]
     etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
-    prices = download_canonical_indices(exposure_names, {e.id: e.yfinance_symbol for e in registry.all()}, years=5, etf_histories=etf_history)
+    prices = download_canonical_indices(
+        exposure_names,
+        {e.id: e.yfinance_symbol for e in registry.all()},
+        years=5,
+        etf_histories=etf_history,
+        canonical_etf_keys=PRIMARY_CANONICAL_ETF_BY_EXPOSURE,
+    )
     source_by_exposure = dict(prices.attrs.get("source_by_exposure", {}))
     resolved_names = dict(prices.attrs.get("resolved_name_by_exposure", {}))
 
-    # Decision-grade rankings may use only authoritative Nifty Indices / NSE histories.
-    # Any Yahoo, ETF/NAV, benchmark, or seed-cache substitution is non-canonical and is
-    # deliberately removed before quantitative calculations. Missing histories remain missing.
+    # Only canonical Nifty/NSE histories and explicitly matched ETF/NAV histories
+    # are decision-grade. Generic Yahoo index fallbacks remain blocked because they
+    # can silently introduce the wrong proxy for an exposure.
     non_authoritative = [
         eid for eid in list(prices.columns)
         if source_by_exposure.get(eid) not in AUTHORITATIVE_CANONICAL_SOURCES
@@ -80,7 +119,7 @@ def build_live(registry):
     benchmark = benchmark_frame.iloc[:, 0]
     valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= 60]
     skipped = [e.id for e in registry.all() if e.id not in valid]
-    source_counts = {k: sum(v == k for v in source_by_exposure.values()) for k in ("niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive", "yahoo", "seed_cache")}
+    source_counts = {k: sum(v == k for v in source_by_exposure.values()) for k in ("niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive", "etf_nav_authoritative", "yahoo", "seed_cache")}
     source_counts["nse"] = source_counts["niftyindices_tri"] + source_counts["niftyindices_pr"] + source_counts["nse_api"] + source_counts["nse_archive"]
     source_counts["mfapi"] = sum(v == "mfapi" for v in etf_sources.values())
     source_counts["amfi"] = sum(v == "amfi" for v in etf_sources.values())

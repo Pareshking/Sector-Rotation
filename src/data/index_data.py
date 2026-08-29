@@ -28,13 +28,29 @@ def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
     return close.dropna(how="all").sort_index()
 
 
-def download_canonical_indices(exposure_names: Mapping[str, str], yfinance_symbols: Mapping[str, str | None], years: int = 5, etf_histories: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Resolve canonical benchmarks through the canonical resolver only."""
+def download_canonical_indices(
+    exposure_names: Mapping[str, str],
+    yfinance_symbols: Mapping[str, str | None],
+    years: int = 5,
+    etf_histories: pd.DataFrame | None = None,
+    canonical_etf_keys: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Resolve canonical benchmarks through official history first, then explicit ETF/NAV.
+
+    `canonical_etf_keys` is an explicit exposure-id -> ETF-history-key map. It is passed
+    through unchanged so the resolver cannot invent a proxy from a different exposure.
+    """
     del yfinance_symbols
     anchor = download_history(["^NSEI"], years=years)
     if not anchor.empty:
         anchor = anchor.rename(columns={"^NSEI": "nifty50"})
-    prices = fetch_missing_indices(exposure_names, existing=anchor, years=years, etf_histories=etf_histories)
+    prices = fetch_missing_indices(
+        exposure_names,
+        existing=anchor,
+        years=years,
+        etf_histories=etf_histories,
+        canonical_etf_keys=canonical_etf_keys,
+    )
     prices = prices.drop(columns=["nifty50"], errors="ignore")
     resolved = dict(prices.attrs.get("resolved_name_by_exposure", {}))
     sources = dict(prices.attrs.get("source_by_exposure", {}))

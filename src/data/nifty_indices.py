@@ -455,13 +455,48 @@ def _load_seed_indices(names):
     return pd.DataFrame(), {}
 
 
-def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], existing=None, years=5, etf_histories=None):
-    """Resolve canonical histories only; never manufacture a missing index from another exposure.
+def _promote_etf_histories(
+    missing: Mapping[str, str],
+    etf_histories: pd.DataFrame | None,
+    canonical_etf_keys: Mapping[str, str] | None,
+    existing_sources: Mapping[str, str],
+    existing_resolved: Mapping[str, str],
+):
+    """Promote explicitly mapped, exposure-matched ETF histories to canonical benchmarks.
 
-    ETF histories are intentionally not accepted as canonical-index substitutes. A missing
-    sector/thematic index remains missing and is reported in `unresolved_exposures`.
+    This is deliberately an explicit exposure -> ETF-key mapping. It never guesses by
+    ticker text, category, or similarity, so an unrelated instrument (e.g. an auto ETF
+    for Capital Goods) cannot become a canonical benchmark accidentally.
     """
-    del etf_histories
+    if etf_histories is None or etf_histories.empty or not canonical_etf_keys:
+        return {}, {}, {}
+    promoted, sources, resolved = {}, dict(existing_sources), dict(existing_resolved)
+    for exposure_id in missing:
+        key = canonical_etf_keys.get(exposure_id)
+        if not key or key not in etf_histories.columns:
+            continue
+        series = pd.to_numeric(etf_histories[key], errors="coerce").dropna()
+        if len(series) < MIN_OBSERVATIONS:
+            continue
+        promoted[exposure_id] = series.rename(exposure_id)
+        sources[exposure_id] = "etf_nav_authoritative"
+        resolved[exposure_id] = f"ETF/NAV:{key}"
+    return promoted, sources, resolved
+
+
+def fetch_missing_indices(
+    names: Mapping[str, str] | Iterable[tuple[str, str]],
+    existing=None,
+    years=5,
+    etf_histories=None,
+    canonical_etf_keys: Mapping[str, str] | None = None,
+):
+    """Resolve canonical histories with an explicit ETF/NAV promotion fallback.
+
+    Priority is official Nifty/NSE history first. When those endpoints do not provide a
+    usable series, an explicitly mapped ETF/Fund NAV history may serve as the canonical
+    market-traded proxy. No unrelated ETF or benchmark is inferred automatically.
+    """
     mapping = dict(names)
     frame = existing.copy() if existing is not None else pd.DataFrame()
     source_by_exposure = dict(frame.attrs.get("source_by_exposure", {}))
@@ -506,6 +541,17 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
                 source_by_exposure[eid] = "nse_archive"
                 resolved_by_exposure[eid] = matched
                 missing.pop(eid, None)
+
+    # Explicit ETF/NAV promotion is intentionally before generic Yahoo index fallback.
+    if missing:
+        promoted, promoted_sources, promoted_resolved = _promote_etf_histories(
+            missing, etf_histories, canonical_etf_keys, source_by_exposure, resolved_by_exposure
+        )
+        for eid, series in promoted.items():
+            frame = frame.drop(columns=[eid], errors="ignore").join(series, how="outer")
+            source_by_exposure[eid] = promoted_sources[eid]
+            resolved_by_exposure[eid] = promoted_resolved[eid]
+            missing.pop(eid, None)
 
     if missing:
         yahoo_frame, yahoo_sources = _fetch_yahoo_fallback(missing, years)
