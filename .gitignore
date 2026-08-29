@@ -7,7 +7,4 @@ venv/
 .env
 .DS_Store
 .streamlit/secrets.toml
-data/processed/*.parquet
-data/processed/*.feather
-data/processed/*.csv
 data/raw/
