@@ -174,7 +174,7 @@ def discover_index_catalogue(force_refresh=False, cache_seconds=CATALOGUE_CACHE_
                 frame = pd.DataFrame(read_json_cache(CATALOGUE_CACHE_FILE))
                 if not frame.empty: return frame
         except Exception: pass
-    frame = _discover_index_catalogue_memory(timeout)
+    frame = _discover_index_catalogue_uncached(timeout) if force_refresh else _discover_index_catalogue_memory(timeout)
     if not frame.empty:
         try:
             CATALOGUE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
