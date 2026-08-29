@@ -2,79 +2,81 @@
 
 Exposure-first quantitative sector and thematic rotation research for Indian equities. The repository separates the canonical **Exposure** (sector/theme + benchmark) from its ETF implementations, authoritative index ingestion, quantitative calculations, and Streamlit presentation.
 
-## Architecture
+## Production data flow
 
 ```text
-NSE Indices / Jugaad NSE adapter / AMFI / ETF sources
+NSE Indices / Jugaad NSE adapter / AMFI / explicitly matched ETF sources
           |
           v
 Universe Registry -> Exposure -> canonical Nifty benchmark
           |
-          +--> direct NiftyIndices/NSE history
-          +--> Jugaad-data NSE/NiftyIndices retrieval adapter
-          +--> explicitly matched ETF/NAV fallback
-          |
           v
-Quantitative engine
-  - 1M / 3M / 6M / 12M relative returns
-  - weekly Mansfield Relative Strength
-  - cross-sectional Z-scores
-  - percentile ranks
-  - RS ratio + RS momentum stage
-          |
-          v
-Prepared Parquet + metadata.json
-          |
-          v
-Streamlit UI (read-only)
+Quantitative engine -> Prepared Parquet + metadata.json -> Streamlit
 ```
 
-## Data hierarchy
+The Streamlit application is presentation-only for historical data: it reads prepared files from `data/processed/` and does not perform bulk historical downloads.
 
-**Canonical index benchmarks:** the pipeline first attempts direct NiftyIndices/NSE historical data. If the direct endpoint is unavailable, the Jugaad-data NSE/NiftyIndices adapter is used to retrieve the same named NSE index history. This is a retrieval adapter, **not a synthetic or category proxy**. If those routes do not provide a decision-grade series, the resolver may use an explicitly matched ETF/NAV series for the same exposure. Generic Yahoo index symbols are deliberately not used as canonical sector/thematic proxies.
+## Data provenance and hierarchy
 
-**Decision gate:** a canonical history needs at least **250 observations** before it is eligible for the Mansfield 52-week and 12-month decision calculations. Histories below that threshold are excluded from decision signals rather than padded or substituted.
+**Canonical index histories:** the pipeline attempts the named Nifty/NSE history first. When the direct endpoint is unavailable, `jugaad-data` is used as an NSE/NiftyIndices retrieval adapter for the same named index. `niftyindices_jugaad` identifies this retrieval route; it must not be described as synthetic data, an ETF proxy, or a separately calculated TRI series.
 
-**ETF market prices:** configured NSE trading symbols are used as the canonical ETF identifiers. Yahoo Finance `.NS` symbols are adapters, not authoritative ticker definitions. Legacy NSE ticker changes are retained as aliases where verified.
+If an explicitly exposure-matched ETF/NAV series is used, its lineage remains ETF/NAV and the mapping must be exact. Nearest-category substitution, broad-market substitution, and synthetic benchmark construction are prohibited.
 
-**ETF NAV fallback:** AMFI historical NAV data can recover explicitly mapped ETF/fund histories when market-price retrieval is unavailable. ETF/NAV data may be promoted to canonical decision input only when the mapping is explicitly exposure-matched; nearest-category substitution is prohibited.
+**Decision gate:** a history requires at least **250 observations** to enter the decision-grade Mansfield 52-week and 12-month calculations. Short histories remain visible where supported by the application, but are not padded, extrapolated, or converted into decision signals.
 
-The Streamlit application never performs bulk historical downloads. It reads prepared files from `data/processed/` only.
+**ETF market data:** configured NSE trading symbols are the canonical ETF identifiers. Yahoo Finance `.NS` symbols, where used, are retrieval adapters rather than authoritative ticker definitions. Verified legacy ticker aliases may be retained.
+
+**ETF NAV:** AMFI historical NAV can recover explicitly mapped ETF/fund histories when market-price retrieval is unavailable. An ETF/NAV series is never accepted merely because it is in the same broad sector.
+
+## Daily production refresh
+
+The GitHub Actions data workflow runs every day at **04:00 IST** (`22:30 UTC` on the previous calendar day). It runs the live pipeline and commits changes under `data/processed/` back to `main`. The pipeline uses the latest available market observation, so weekends and NSE holidays naturally use the most recent working-day observation.
+
+The workflow is concurrency-protected so overlapping production runs do not intentionally compete. Generated data is the only workflow output committed automatically; source code changes are reviewed and committed separately.
+
+## Decision-grade principles
+
+1. **No synthetic benchmark proxies.** A benchmark must represent the declared exposure.
+2. **Source lineage is explicit.** Retrieval mechanism and financial instrument are not conflated.
+3. **250 observations is the decision boundary.** No NaN padding or artificial history is used to satisfy it.
+4. **Exposure comes before ETF.** ETF liquidity, tracking characteristics, or ticker mechanics must not redefine sector strength.
+5. **Catalogue membership is not universe membership.** NSE publishes many ESG, Shariah, corporate-group, factor, size, liquidity, and strategy indices that are not automatically sector-rotation exposures.
 
 ## Domain model
 
-`Exposure` is the primary object. Each exposure contains:
+`Exposure` is the primary object. Each exposure contains its canonical sector/thematic category, canonical Nifty benchmark, optional retrieval symbols, and ETF implementations where available.
 
-- canonical sector/thematic category
-- canonical Nifty benchmark
-- optional Yahoo Finance benchmark symbol
-- zero, one, or multiple ETF implementations
-- verified NSE symbol
-- optional legacy ticker aliases
-- optional AUM, expense ratio, liquidity and tracking-error metadata
-
-This prevents an ETF-specific liquidity or tracking characteristic from being interpreted as sector strength.
+This separation prevents an ETF-specific liquidity or tracking characteristic from being interpreted as sector strength.
 
 ## Quantitative definitions
-
-### Relative return
 
 For lookback `L`:
 
 `R_L = P_t / P_{t-L} - 1`
 
-Relative momentum against Nifty 50 is:
+Relative momentum against Nifty 50:
 
 `DM_L = R_exposure,L - R_benchmark,L`
 
-### Mansfield Relative Strength
-
-First calculate the price-relative series and resample to Friday observations:
+For Mansfield Relative Strength, calculate the price-relative series and use Friday observations:
 
 `RS_t = P_exposure,t / P_benchmark,t`
-
-Then use the 52-week rolling mean baseline:
 
 `MRS_t = 100 * (RS_t / SMA(RS_t, 52) - 1)`
 
 RS momentum is the 13-week change in MRS.
+
+## Development and verification
+
+Run the test suite before production changes. For a live data validation run:
+
+```bash
+pytest -q
+python -m pipeline.run_pipeline --mode live
+```
+
+Inspect both generated Parquet data and `metadata.json`. Confirm observation counts, dates, source lineage, missing/short histories, and decision-grade eligibility rather than relying only on a successful process exit.
+
+## Current catalogue versus rotation universe
+
+The NSE catalogue is broader than the curated rotation universe. Sectoral and thematic indices can be evaluated as candidate exposures, while ESG, Shariah, corporate-group, factor/strategy, size/liquidity, IPO and similar indices require separate justification before entering the rotation model. Overlapping variants (for example equal-weight alternatives or closely related infrastructure/mobility variants) should not automatically be counted as independent economic sectors.
