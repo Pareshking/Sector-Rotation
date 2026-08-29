@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: "30 12 * * 1-5"
 
+concurrency:
+  group: sector-rotation-data-pipeline-main
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
