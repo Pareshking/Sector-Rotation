@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import StringIO
 from typing import Iterable, Mapping
+from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -13,9 +14,10 @@ import requests
 BASE_URL = "https://www.niftyindices.com"
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
 HISTORICAL_URL = f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString"
+NSE_API_URL = "https://www.nseindia.com/api/historical/indicesHistory"
 NSE_ARCHIVE_URLS = ("https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv", "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv")
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
-NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "text/csv,*/*;q=0.8", "Referer": "https://www.nseindia.com/"}
+NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json,text/plain,*/*", "Referer": "https://www.nseindia.com/", "Accept-Language": "en-US,en;q=0.9"}
 
 
 def _canonical_name(name: str) -> str:
@@ -42,8 +44,8 @@ def _request(name: str, start: date, end: date, timeout: int = 45) -> list[dict[
 def _rows_to_series(name: str, rows: list[dict[str, object]]) -> pd.Series:
     records: list[tuple[pd.Timestamp, float]] = []
     for row in rows:
-        raw_date = row.get("HistoricalDate") or row.get("Date")
-        raw_close = row.get("CLOSE") or row.get("Close") or row.get("Closing Index Value")
+        raw_date = row.get("HistoricalDate") or row.get("Date") or row.get("EOD_TIMESTAMP")
+        raw_close = row.get("CLOSE") or row.get("Close") or row.get("Closing Index Value") or row.get("EOD_CLOSE_INDEX_VAL")
         if raw_date is None or raw_close in (None, "", "-"):
             continue
         parsed_date = pd.to_datetime(raw_date, dayfirst=True, errors="coerce")
@@ -67,6 +69,21 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
     raise RuntimeError(f"Nifty Indices request failed for {name!r}: {last_error}") from last_error
 
 
+def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = 15) -> pd.Series:
+    """Fetch a date-range history from NSE's official historical index API."""
+    session = requests.Session()
+    session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
+    params = {"indexType": name, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}
+    response = session.get(NSE_API_URL, params=params, headers=NSE_HEADERS, timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    rows = data.get("indexCloseOnlineRecords", []) if isinstance(data, dict) else []
+    if not isinstance(rows, list):
+        return pd.Series(dtype="float64", name=name)
+    return _rows_to_series(name, rows)
+
+
 def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.DataFrame:
     session = requests.Session()
     try:
@@ -76,7 +93,7 @@ def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.
     content: bytes | None = None
     for template in NSE_ARCHIVE_URLS:
         try:
-            response = session.get(template.format(date=day.strftime("%d%m%Y")), headers=NSE_HEADERS, timeout=timeout)
+            response = session.get(template.format(date=day.strftime("%d%m%Y")), headers={**NSE_HEADERS, "Accept": "text/csv,*/*;q=0.8"}, timeout=timeout)
             if response.status_code == 200 and len(response.content) >= 300:
                 content = response.content
                 break
@@ -100,7 +117,6 @@ def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.
 
 
 def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 8, workers: int = 6) -> pd.DataFrame:
-    """Backfill requested indices from NSE's daily multi-index archive."""
     wanted = {_canonical_name(name): name for name in names}
     if not wanted:
         return pd.DataFrame()
@@ -115,12 +131,7 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
     if not rows:
         return pd.DataFrame()
     all_rows = pd.concat(rows, ignore_index=True).drop_duplicates(subset=["_canonical", "date"])
-    result: dict[str, pd.Series] = {}
-    for canonical, original in wanted.items():
-        subset = all_rows[all_rows["_canonical"] == canonical]
-        if not subset.empty:
-            result[original] = subset.set_index("date")["close"].sort_index().rename(original)
-    return pd.DataFrame(result).sort_index()
+    return pd.DataFrame({original: all_rows.loc[all_rows["_canonical"].eq(canonical)].set_index("date")["close"].sort_index() for canonical, original in wanted.items() if not all_rows.loc[all_rows["_canonical"].eq(canonical)].empty}).sort_index()
 
 
 def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], existing: pd.DataFrame | None = None, years: int = 5) -> pd.DataFrame:
@@ -133,21 +144,23 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
         series = frame[exposure_id] if exposure_id in frame.columns else pd.Series(dtype="float64")
         if series.dropna().size >= 60:
             continue
-        if not nifty_available:
-            missing[exposure_id] = index_name
-            continue
-        try:
-            fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
-        except RuntimeError:
-            nifty_available = False
-            missing[exposure_id] = index_name
-            for remaining_id, remaining_name in items[position + 1:]:
-                remaining = frame[remaining_id] if remaining_id in frame.columns else pd.Series(dtype="float64")
-                if remaining.dropna().size < 60:
-                    missing[remaining_id] = remaining_name
-            break
+        if nifty_available:
+            try:
+                fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
+            except RuntimeError:
+                nifty_available = False
+                fetched = pd.Series(dtype="float64")
+        else:
+            fetched = pd.Series(dtype="float64")
         if fetched.dropna().size >= 60:
             frame = frame.drop(columns=[exposure_id], errors="ignore").join(fetched.rename(exposure_id), how="outer")
+            continue
+        try:
+            api_series = fetch_nse_api_index_history(index_name, date.today() - timedelta(days=365 * years + 10), date.today())
+        except (requests.RequestException, ValueError, json.JSONDecodeError):
+            api_series = pd.Series(dtype="float64")
+        if api_series.dropna().size >= 60:
+            frame = frame.drop(columns=[exposure_id], errors="ignore").join(api_series.rename(exposure_id), how="outer")
         else:
             missing[exposure_id] = index_name
     if missing:
