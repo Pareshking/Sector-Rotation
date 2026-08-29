@@ -3,7 +3,7 @@ from datetime import date
 
 import pandas as pd
 
-from src.data.nifty_indices import fetch_nifty_index_history
+from src.data.nifty_indices import fetch_nifty_index_history, resolve_index_names
 
 
 class _Response:
@@ -31,3 +31,12 @@ def test_nifty_indices_parser(monkeypatch) -> None:
     assert isinstance(series, pd.Series)
     assert len(series) == 2
     assert float(series.iloc[-1]) == 25050.0
+
+
+def test_official_index_aliases() -> None:
+    assert resolve_index_names("telecom")[0] == "NIFTY TELECOMMUNICATIONS"
+    assert resolve_index_names("NBFC")[0] == "NIFTY FINANCIAL SERVICES EX-BANK"
+    assert resolve_index_names("healthcare")[:2] == ["NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"]
+    assert resolve_index_names("power")[0] == "NIFTY POWER"
+    assert resolve_index_names("capital-goods")[0] == "NIFTY CAPITAL GOODS"
+    assert resolve_index_names("consumer-services")[0] == "NIFTY CONSUMER SERVICES"
