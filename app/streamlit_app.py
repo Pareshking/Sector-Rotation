@@ -11,25 +11,27 @@ DATA_DIR = ROOT / "data" / "processed"
 st.set_page_config(page_title="India Sector Rotation", page_icon="📊", layout="wide")
 
 
-def load_summary() -> pd.DataFrame:
-    path = DATA_DIR / "summary_rankings.parquet"
+def _read(name: str) -> pd.DataFrame:
+    path = DATA_DIR / name
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
+
+
+def load_summary() -> pd.DataFrame:
+    return _read("summary_rankings.parquet")
 
 
 def load_rs() -> pd.DataFrame:
-    path = DATA_DIR / "rs_matrix.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
+    return _read("rs_matrix.parquet")
 
 
 def load_etfs() -> pd.DataFrame:
-    path = DATA_DIR / "etf_universe.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
+    return _read("etf_universe.parquet")
+
+
+def load_etf_prices() -> pd.DataFrame:
+    return _read("etf_prices.parquet")
 
 
 def main() -> None:
@@ -40,8 +42,7 @@ def main() -> None:
         st.warning("Prepared data is not available yet. Run `python -m pipeline.run_pipeline --mode fixture` locally or trigger the GitHub data pipeline.")
         st.stop()
     st.markdown("Use the pages in the sidebar to inspect sectors, themes, rankings and ETF implementations.")
-    top = summary.sort_values("rank").head(10)
-    st.dataframe(top, use_container_width=True, hide_index=True)
+    st.dataframe(summary.sort_values("rank").head(10), use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
