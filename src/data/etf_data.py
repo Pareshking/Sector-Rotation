@@ -14,7 +14,7 @@ from src.models.exposure import ETFMapping
 
 MIN_OBSERVATIONS = 60
 MAX_MFAPI_WORKERS = 5
-NETWORK_TIMEOUT = 15
+NETWORK_TIMEOUT = (5, 10)
 
 
 def download_market_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
@@ -25,9 +25,11 @@ def download_market_history(symbols: Iterable[str], years: int = 5) -> pd.DataFr
 
 
 def _amfi_fallback(etf: ETFMapping, days: int = 90) -> pd.Series:
-    current = fetch_amfi_nav(timeout=NETWORK_TIMEOUT)
-    codes = find_scheme_codes(current, [etf.name])
-    code = codes.get(etf.name)
+    code = str(etf.scheme_code) if etf.scheme_code is not None else None
+    if code is None:
+        current = fetch_amfi_nav(timeout=NETWORK_TIMEOUT)
+        codes = find_scheme_codes(current, [etf.name])
+        code = codes.get(etf.name)
     if not code:
         return pd.Series(dtype="float64", name=etf.symbol or etf.name)
     history = fetch_amfi_history(
@@ -35,6 +37,7 @@ def _amfi_fallback(etf: ETFMapping, days: int = 90) -> pd.Series:
         date.today(),
         scheme_codes=[code],
         timeout=NETWORK_TIMEOUT,
+        chunk_days=365,
     )
     if history.empty:
         return pd.Series(dtype="float64", name=etf.symbol or etf.name)
