@@ -3,6 +3,8 @@ name: Data Pipeline
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "data/processed/**"
   workflow_dispatch:
   schedule:
     - cron: "30 12 * * 1-5"
