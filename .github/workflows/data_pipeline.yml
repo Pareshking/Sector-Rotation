@@ -7,7 +7,10 @@ on:
       - "data/processed/**"
   workflow_dispatch:
   schedule:
-    - cron: "30 12 * * 1-5"
+    # 04:00 IST = 22:30 UTC on the previous calendar day.
+    # Run every calendar day; the pipeline uses the latest available market observation,
+    # so weekends and NSE holidays naturally fall back to the most recent working day.
+    - cron: "30 22 * * *"
 
 concurrency:
   group: sector-rotation-data-pipeline-main
