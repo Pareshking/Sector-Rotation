@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import streamlit as st
-from app.streamlit_app import load_etfs, load_rs, load_summary
-from app.components.charts import rs_trajectory
+from app.streamlit_app import load_etf_prices, load_etfs, load_rs, load_summary
+from app.components.charts import drawdown_chart, rs_trajectory
 
 st.title("ETF Detail")
 etfs = load_etfs()
 summary = load_summary()
 rs = load_rs()
+etf_prices = load_etf_prices()
 if etfs.empty:
     st.info("No ETF metadata is available in the prepared dataset.")
     st.stop()
@@ -22,3 +23,8 @@ if not row.empty:
     exposure_id = row.iloc[0]["exposure_id"]
     if exposure_id in rs.columns:
         st.plotly_chart(rs_trajectory(rs, exposure_id), use_container_width=True)
+
+for symbol in selected["symbol"].tolist():
+    if symbol in etf_prices.columns:
+        st.subheader(f"{symbol} — historical drawdown")
+        st.plotly_chart(drawdown_chart(etf_prices[symbol]), use_container_width=True)
