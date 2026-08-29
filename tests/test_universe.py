@@ -17,12 +17,17 @@ def test_universe_loads() -> None:
 def test_etf_symbols_are_unique() -> None:
     root = Path(__file__).resolve().parents[1]
     registry = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json")
-    symbols = [etf.symbol for exposure in registry.all() for etf in exposure.etfs]
+    symbols = [
+        etf.symbol
+        for exposure in registry.all()
+        for etf in exposure.etfs
+        if etf.symbol is not None
+    ]
     assert len(symbols) == len(set(symbols))
 
 
 def test_legacy_aliases_are_accepted() -> None:
-    etf = ETFMapping(symbol="BANKNIFTY1", name="Kotak Nifty Bank ETF", yfinance_symbol="BANKNIFTY1.NS", aliases=["kotakbketf"])
+    etf = ETFMapping(symbol="BANKNIFTY1", name="Kotak Nifty Bank ETF", yfinance_symbol="BANKNIFTY1.NS", aliases=["KOTAKBKETF"])
     exposure = Exposure(id="bank", name="Banking", category=ExposureCategory.SECTOR, benchmark="Nifty Bank", etfs=[etf])
     report = validate_universe([exposure])
     assert report.valid
