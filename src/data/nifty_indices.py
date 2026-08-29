@@ -13,14 +13,7 @@ BASE_URL = "https://www.niftyindices.com"
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
 HISTORICAL_URL = f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString"
 NSE_ARCHIVE_URL = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv"
-HEADERS = {
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Content-Type": "application/json; charset=UTF-8",
-    "Origin": BASE_URL,
-    "Referer": HISTORICAL_PAGE,
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0",
-    "X-Requested-With": "XMLHttpRequest",
-}
+HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "text/csv,*/*;q=0.8", "Referer": "https://www.nseindia.com/"}
 
 
@@ -60,7 +53,7 @@ def _rows_to_series(name: str, rows: list[dict[str, object]]) -> pd.Series:
     return pd.Series(dict(records)).sort_index().rename(name) if records else pd.Series(dtype="float64", name=name)
 
 
-def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 3) -> pd.Series:
+def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 1) -> pd.Series:
     """Fetch authoritative Nifty price-index history from NSE Indices."""
     end_date = end or date.today()
     start_date = start or (end_date - timedelta(days=365 * years + 10))
@@ -114,14 +107,25 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
     mapping = dict(names)
     frame = existing.copy() if existing is not None else pd.DataFrame()
     missing: dict[str, str] = {}
-    for exposure_id, index_name in mapping.items():
+    nifty_available = True
+    items = list(mapping.items())
+    for position, (exposure_id, index_name) in enumerate(items):
         series = frame[exposure_id] if exposure_id in frame.columns else pd.Series(dtype="float64")
         if series.dropna().size >= 60:
             continue
+        if not nifty_available:
+            missing[exposure_id] = index_name
+            continue
         try:
-            fetched = fetch_nifty_index_history(index_name, years=years)
+            fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
         except RuntimeError:
-            fetched = pd.Series(dtype="float64", name=index_name)
+            nifty_available = False
+            missing[exposure_id] = index_name
+            for remaining_id, remaining_name in items[position + 1:]:
+                remaining = frame[remaining_id] if remaining_id in frame.columns else pd.Series(dtype="float64")
+                if remaining.dropna().size < 60:
+                    missing[remaining_id] = remaining_name
+            break
         if fetched.dropna().size >= 60:
             frame = frame.drop(columns=[exposure_id], errors="ignore").join(fetched.rename(exposure_id), how="outer")
         else:
