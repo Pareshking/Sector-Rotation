@@ -35,25 +35,31 @@ def get_metadata() -> dict[str, object]:
 def data_health_banner(metadata: dict[str, object] | None = None) -> None:
     metadata = metadata if metadata is not None else get_metadata()
     if not metadata:
-        st.info("Data health: metadata unavailable")
+        st.error("Data health · metadata unavailable")
         return
     coverage = float(metadata.get("canonical_coverage_ratio", metadata.get("coverage_ratio", 0.0)))
     updated = str(metadata.get("last_updated_utc", "unknown"))
-    fallback = metadata.get("fallback_canonical_exposures", [])
     skipped = metadata.get("skipped_canonical_exposures", [])
-    if coverage >= 1.0 and not skipped:
-        st.success(f"Data health: 100% canonical coverage · updated {updated}")
-    elif coverage > 0:
-        st.warning(f"Data health: {coverage:.1%} canonical coverage · updated {updated} · fallback {len(fallback)} · skipped {len(skipped)}")
-    else:
-        st.error(f"Data health: no valid canonical series · updated {updated}")
+    fallback = metadata.get("fallback_canonical_exposures", [])
+    status = "VERIFIED" if coverage >= 1.0 and not skipped else "ATTENTION"
+    icon = "●" if status == "VERIFIED" else "!"
+    st.markdown(
+        f'''<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;margin:0 0 14px;">
+        <div><span style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b;">Data health</span><br><span style="font-size:1.05rem;font-weight:700;color:#0f172a;">{coverage:.0%} canonical coverage</span></div>
+        <div style="text-align:right;font-size:.74rem;color:#64748b;">{icon} <strong style="color:{'#059669' if status == 'VERIFIED' else '#d97706'}">{status}</strong><br>updated {updated} · {len(fallback)} fallback · {len(skipped)} skipped</div>
+        </div>''',
+        unsafe_allow_html=True,
+    )
 
 
 def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
     metadata = metadata if metadata is not None else get_metadata()
     source_map = metadata.get("source_by_canonical_exposure", {})
     name_map = metadata.get("resolved_official_index_names", {})
-    rows = [{"exposure": exposure, "source": source, "resolved_name": name_map.get(exposure, exposure)} for exposure, source in source_map.items()]
+    rows = [
+        {"exposure": exposure, "source": source, "resolved_name": name_map.get(exposure, exposure)}
+        for exposure, source in source_map.items()
+    ]
     return pd.DataFrame(rows).sort_values("exposure") if rows else pd.DataFrame(columns=["exposure", "source", "resolved_name"])
 
 
@@ -61,8 +67,11 @@ def metric_row(summary: pd.DataFrame) -> None:
     total = len(summary)
     leading = int((summary.get("stage", pd.Series(dtype=str)) == "Leading").sum())
     improving = int((summary.get("stage", pd.Series(dtype=str)) == "Improving").sum())
-    st.metric("Exposures", total)
-    cols = st.columns(3)
-    cols[0].metric("Leading", leading)
-    cols[1].metric("Improving", improving)
-    cols[2].metric("Top Rank", summary.iloc[0]["exposure"] if not summary.empty else "—")
+    weakening = int((summary.get("stage", pd.Series(dtype=str)) == "Weakening").sum())
+    lagging = int((summary.get("stage", pd.Series(dtype=str)) == "Lagging").sum())
+    cols = st.columns(5)
+    cols[0].metric("Exposures", total)
+    cols[1].metric("Leading", leading)
+    cols[2].metric("Improving", improving)
+    cols[3].metric("Weakening", weakening)
+    cols[4].metric("Lagging", lagging)
