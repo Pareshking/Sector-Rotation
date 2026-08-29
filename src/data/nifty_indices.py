@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import StringIO
 from typing import Iterable, Mapping
@@ -12,10 +13,7 @@ import requests
 BASE_URL = "https://www.niftyindices.com"
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
 HISTORICAL_URL = f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString"
-NSE_ARCHIVE_URLS = (
-    "https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv",
-    "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv",
-)
+NSE_ARCHIVE_URLS = ("https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv", "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv")
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "text/csv,*/*;q=0.8", "Referer": "https://www.nseindia.com/"}
 
@@ -34,8 +32,7 @@ def _request(name: str, start: date, end: date, timeout: int = 45) -> list[dict[
         pass
     response = session.post(HISTORICAL_URL, headers=HEADERS, json=payload, timeout=timeout)
     response.raise_for_status()
-    body = response.json()
-    raw = body.get("d", "[]")
+    raw = response.json().get("d", "[]")
     rows = json.loads(raw) if isinstance(raw, str) else raw
     if not isinstance(rows, list):
         raise ValueError(f"Unexpected Nifty Indices response for {name!r}")
@@ -57,7 +54,6 @@ def _rows_to_series(name: str, rows: list[dict[str, object]]) -> pd.Series:
 
 
 def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 1) -> pd.Series:
-    """Fetch authoritative Nifty price-index history from NSE Indices."""
     end_date = end or date.today()
     start_date = start or (end_date - timedelta(days=365 * years + 10))
     last_error: Exception | None = None
@@ -71,42 +67,51 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
     raise RuntimeError(f"Nifty Indices request failed for {name!r}: {last_error}") from last_error
 
 
-def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 10) -> pd.DataFrame:
+def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.DataFrame:
+    session = requests.Session()
+    try:
+        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=5)
+    except requests.RequestException:
+        pass
+    content: bytes | None = None
+    for template in NSE_ARCHIVE_URLS:
+        try:
+            response = session.get(template.format(date=day.strftime("%d%m%Y")), headers=NSE_HEADERS, timeout=timeout)
+            if response.status_code == 200 and len(response.content) >= 300:
+                content = response.content
+                break
+        except requests.RequestException:
+            continue
+    if content is None:
+        return pd.DataFrame()
+    try:
+        frame = pd.read_csv(StringIO(content.decode("utf-8", errors="replace")))
+        if "Index Name" not in frame.columns or "Closing Index Value" not in frame.columns:
+            return pd.DataFrame()
+        frame["_canonical"] = frame["Index Name"].astype(str).map(_canonical_name)
+        selected = frame[frame["_canonical"].isin(wanted)].copy()
+        if selected.empty:
+            return pd.DataFrame()
+        selected["date"] = pd.to_datetime(selected["Index Date"], dayfirst=True, errors="coerce")
+        selected["close"] = pd.to_numeric(selected["Closing Index Value"], errors="coerce")
+        return selected.dropna(subset=["date", "close"])[["_canonical", "date", "close"]]
+    except (UnicodeDecodeError, ValueError, pd.errors.ParserError):
+        return pd.DataFrame()
+
+
+def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 8, workers: int = 6) -> pd.DataFrame:
     """Backfill requested indices from NSE's daily multi-index archive."""
     wanted = {_canonical_name(name): name for name in names}
     if not wanted:
         return pd.DataFrame()
-    session = requests.Session()
-    try:
-        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
-    except requests.RequestException:
-        pass
+    days = list(pd.bdate_range(start=start, end=end))
     rows: list[pd.DataFrame] = []
-    for day in pd.bdate_range(start=start, end=end):
-        content: bytes | None = None
-        for template in NSE_ARCHIVE_URLS:
-            try:
-                response = session.get(template.format(date=day.strftime("%d%m%Y")), headers=NSE_HEADERS, timeout=timeout)
-                if response.status_code == 200 and len(response.content) >= 300:
-                    content = response.content
-                    break
-            except requests.RequestException:
-                continue
-        if content is None:
-            continue
-        try:
-            frame = pd.read_csv(StringIO(content.decode("utf-8", errors="replace")))
-            if "Index Name" not in frame.columns or "Closing Index Value" not in frame.columns:
-                continue
-            frame["_canonical"] = frame["Index Name"].astype(str).map(_canonical_name)
-            selected = frame[frame["_canonical"].isin(wanted)].copy()
-            if selected.empty:
-                continue
-            selected["date"] = pd.to_datetime(selected["Index Date"], dayfirst=True, errors="coerce")
-            selected["close"] = pd.to_numeric(selected["Closing Index Value"], errors="coerce")
-            rows.append(selected.dropna(subset=["date", "close"])[["_canonical", "date", "close"]])
-        except (UnicodeDecodeError, ValueError, pd.errors.ParserError):
-            continue
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_fetch_archive_day, day, set(wanted), timeout) for day in days]
+        for future in as_completed(futures):
+            frame = future.result()
+            if not frame.empty:
+                rows.append(frame)
     if not rows:
         return pd.DataFrame()
     all_rows = pd.concat(rows, ignore_index=True).drop_duplicates(subset=["_canonical", "date"])
@@ -119,7 +124,6 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
 
 
 def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], existing: pd.DataFrame | None = None, years: int = 5) -> pd.DataFrame:
-    """Fill missing canonical series using Nifty Indices, then NSE archive."""
     mapping = dict(names)
     frame = existing.copy() if existing is not None else pd.DataFrame()
     missing: dict[str, str] = {}
