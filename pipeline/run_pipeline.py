@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
 OUTPUT = ROOT / "data" / "processed"
 
+AUTHORITATIVE_CANONICAL_SOURCES = {"niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive"}
+
 
 def build_fixture(registry, days=1300):
     rng = np.random.default_rng(42)
@@ -59,14 +61,25 @@ def build_live(registry):
     etf_objects = [etf for e in registry.all() for etf in e.etfs]
     etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
     prices = download_canonical_indices(exposure_names, {e.id: e.yfinance_symbol for e in registry.all()}, years=5, etf_histories=etf_history)
+    source_by_exposure = dict(prices.attrs.get("source_by_exposure", {}))
+    resolved_names = dict(prices.attrs.get("resolved_name_by_exposure", {}))
+
+    # Decision-grade rankings may use only authoritative Nifty Indices / NSE histories.
+    # Any Yahoo, ETF/NAV, benchmark, or seed-cache substitution is non-canonical and is
+    # deliberately removed before quantitative calculations. Missing histories remain missing.
+    non_authoritative = [
+        eid for eid in list(prices.columns)
+        if source_by_exposure.get(eid) not in AUTHORITATIVE_CANONICAL_SOURCES
+    ]
+    if non_authoritative:
+        prices = prices.drop(columns=non_authoritative, errors="ignore")
+
     benchmark_frame = download_history([registry.benchmark_symbol], years=5)
     if benchmark_frame.empty:
         raise RuntimeError("Unable to download Nifty 50 benchmark history")
     benchmark = benchmark_frame.iloc[:, 0]
     valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= 60]
     skipped = [e.id for e in registry.all() if e.id not in valid]
-    source_by_exposure = dict(prices.attrs.get("source_by_exposure", {}))
-    resolved_names = dict(prices.attrs.get("resolved_name_by_exposure", {}))
     source_counts = {k: sum(v == k for v in source_by_exposure.values()) for k in ("niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive", "yahoo", "seed_cache")}
     source_counts["nse"] = source_counts["niftyindices_tri"] + source_counts["niftyindices_pr"] + source_counts["nse_api"] + source_counts["nse_archive"]
     source_counts["mfapi"] = sum(v == "mfapi" for v in etf_sources.values())
@@ -78,7 +91,7 @@ def build_live(registry):
         "valid_canonical_series": len(valid),
         "skipped_canonical_series": len(skipped),
         "canonical_coverage_ratio": len(valid) / max(len(registry.all()), 1),
-        "fallback_canonical_exposures": [eid for eid in valid if source_by_exposure.get(eid) not in {"niftyindices_tri", "niftyindices_pr"}],
+        "fallback_canonical_exposures": [eid for eid, source in source_by_exposure.items() if source not in AUTHORITATIVE_CANONICAL_SOURCES],
         "skipped_canonical_exposures": skipped,
         "missing_yfinance_symbols": [e.id for e in registry.all() if not e.yfinance_symbol],
         "source_counts": source_counts,
@@ -110,7 +123,7 @@ def run(mode):
     prices = prices.loc[common].sort_index()
     benchmark = benchmark.loc[common].sort_index()
     if prices.empty:
-        raise RuntimeError("No overlapping benchmark/exposure history was downloaded")
+        raise RuntimeError("No overlapping authoritative benchmark/exposure history was downloaded")
 
     rankings = rank_exposures(prices, benchmark)
     summary_rows = []
