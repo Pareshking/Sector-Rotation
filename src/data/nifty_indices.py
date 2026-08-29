@@ -103,9 +103,25 @@ def _make_session(session=None):
     if hasattr(headers, "update"): headers.update(HEADERS)
     return session
 
+def _make_nifty_session(session=None, timeout=DEFAULT_TIMEOUT):
+    """Warm a NiftyIndices session before POSTing to the ASP.NET endpoints.
+
+    Current NiftyIndices protection can return an empty/HTML response to a cold
+    POST even when the payload is correct. A normal GET of the historical-data
+    page establishes the session/cookies first; cloudscraper then handles the
+    challenge when available. This change is intentionally confined to the
+    pipeline and never runs from the Streamlit UI.
+    """
+    s = _make_session(session)
+    try:
+        s.get(HISTORICAL_PAGE, headers=HEADERS, timeout=timeout)
+    except Exception:
+        pass
+    return s
+
 def _post_json(url, payload, timeout=DEFAULT_TIMEOUT, session=None):
     try:
-        response = _make_session(session).post(url, headers=HEADERS, json=payload, timeout=timeout); response.raise_for_status(); return _parse_api_payload(response.json())
+        response = _make_nifty_session(session, timeout=timeout).post(url, headers=HEADERS, json=payload, timeout=timeout); response.raise_for_status(); return _parse_api_payload(response.json())
     except Exception: return []
 
 def _seed_catalogue(): return pd.DataFrame(AUTHORITATIVE_CATALOGUE_SEED, columns=["name","category"])
@@ -175,7 +191,7 @@ def resolve_index_names(name,catalogue=None):
     candidates.append(_canonical_name(name)); return list(dict.fromkeys(candidates))
 
 def _request_endpoint(endpoint_candidates,name,start,end,timeout=DEFAULT_TIMEOUT,session=None):
-    payload={"cinfo":"{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}"%(name,start.strftime("%d-%b-%Y"),end.strftime("%d-%b-%Y"),name)}; s=_make_session(session)
+    payload={"cinfo":"{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}"%(name,start.strftime("%d-%b-%Y"),end.strftime("%d-%b-%Y"),name)}; s=_make_nifty_session(session, timeout=timeout)
     for endpoint in endpoint_candidates:
         try:
             response=s.post(endpoint,headers=HEADERS,json=payload,timeout=timeout); response.raise_for_status(); rows=_parse_api_payload(response.json())
@@ -310,8 +326,6 @@ def _load_seed_indices(names):
         if output: return pd.DataFrame(output).sort_index(),sources
     return pd.DataFrame(),{}
 
-# Broad, explicit fallback benchmarks. These use real resolved market observations;
-# they are not synthetic index levels and are marked separately in metadata.
 BENCHMARK_PROXY_MAP={
     "capital-goods":"auto","cement":"auto","chemicals":"metal","consumer-durables":"auto","consumer-services":"nifty50","media":"nifty50","oil-gas":"nifty50","power":"bank","private-bank":"bank","realty":"nifty50","telecom":"nifty50","manufacturing":"auto","infrastructure":"nifty50","infrastructure-logistics":"auto","railways":"bank","digital":"it","internet":"it","tourism":"nifty50","energy":"nifty50","commodities":"metal","capital-markets":"bank","mnc":"nifty50","services":"nifty50","rural":"fmcg","mobility":"auto","reit-invit":"nifty50",
 }
@@ -329,7 +343,7 @@ def fetch_missing_indices(names: Mapping[str,str] | Iterable[tuple[str,str]],exi
     missing={eid:name for eid,name in mapping.items() if eid not in frame.columns or len(frame[eid].dropna())<MIN_OBSERVATIONS}; start=date.today()-timedelta(days=365*years+10)
     if missing:
         def one(item):
-            eid,name=item; return eid,fetch_nifty_index_history(name,years=years,start=start,end=date.today(),retries=1,catalogue=catalogue)
+            eid,name=item; return eid,fetch_nifty_index_history(name,years=years,start=start,end=date.today(),retries=2,catalogue=catalogue)
         with ThreadPoolExecutor(max_workers=min(5,len(missing))) as ex:
             futures=[ex.submit(one,item) for item in missing.items()]
             for fut in as_completed(futures):

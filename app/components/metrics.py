@@ -38,16 +38,21 @@ def data_health_banner(metadata: dict[str, object] | None = None) -> None:
         st.error("Data health · metadata unavailable")
         return
     coverage = float(metadata.get("canonical_coverage_ratio", metadata.get("coverage_ratio", 0.0)))
+    etf_coverage = float(metadata.get("etf_coverage_ratio", 0.0))
     updated = str(metadata.get("last_updated_utc", "unknown"))
     skipped = metadata.get("skipped_canonical_exposures", [])
     fallback = metadata.get("fallback_canonical_exposures", [])
+    proxy_count = sum(1 for source in metadata.get("source_by_canonical_exposure", {}).values() if source == "benchmark_proxy")
     status = "VERIFIED" if coverage >= 1.0 and not skipped else "ATTENTION"
-    icon = "●" if status == "VERIFIED" else "!"
+    status_class = "sr-callout-good" if status == "VERIFIED" else "sr-callout"
     st.markdown(
-        f'''<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;margin:0 0 14px;">
-        <div><span style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b;">Data health</span><br><span style="font-size:1.05rem;font-weight:700;color:#0f172a;">{coverage:.0%} canonical coverage</span></div>
-        <div style="text-align:right;font-size:.74rem;color:#64748b;">{icon} <strong style="color:{'#059669' if status == 'VERIFIED' else '#d97706'}">{status}</strong><br>updated {updated} · {len(fallback)} fallback · {len(skipped)} skipped</div>
-        </div>''',
+        f'''<div class="sr-card {status_class}" style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;">
+          <div><div class="sr-card-label">Data health</div>
+          <div class="sr-card-value">{coverage:.0%} canonical · {etf_coverage:.0%} ETF</div>
+          <div class="sr-card-note">{len(fallback)} canonical fallbacks · {proxy_count} benchmark-proxy histories · {len(skipped)} skipped</div></div>
+          <div style="text-align:right;font-size:.72rem;white-space:nowrap;"><strong>{status}</strong><br>{updated}</div>
+        </div></div>''',
         unsafe_allow_html=True,
     )
 
@@ -63,15 +68,52 @@ def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("exposure") if rows else pd.DataFrame(columns=["exposure", "source", "resolved_name"])
 
 
+def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
+    """Create an explicit, conservative decision layer from prepared metrics.
+
+    Benchmark-proxy histories are never promoted to a buy/sell signal. They are
+    kept visible for universe coverage but marked PROXY ONLY until authoritative
+    index history is available.
+    """
+    if summary.empty:
+        return summary.copy()
+    frame = summary.copy()
+    source = frame.get("data_source", pd.Series("", index=frame.index)).fillna("").astype(str)
+    stage = frame.get("stage", pd.Series("", index=frame.index)).fillna("").astype(str)
+    ratio = pd.to_numeric(frame.get("rs_ratio", pd.Series(float("nan"), index=frame.index)), errors="coerce")
+    velocity = pd.to_numeric(frame.get("rs_momentum", pd.Series(float("nan"), index=frame.index)), errors="coerce")
+    momentum = pd.to_numeric(frame.get("momentum_z", pd.Series(float("nan"), index=frame.index)), errors="coerce")
+
+    proxy = source.eq("benchmark_proxy")
+    buy = (~proxy) & stage.eq("Leading") & ratio.gt(1.0) & velocity.gt(0) & momentum.gt(0)
+    reduce = (~proxy) & stage.isin(["Weakening", "Lagging"]) & ratio.lt(1.0) & velocity.lt(0)
+    improving = (~proxy) & stage.eq("Improving") & ratio.gt(1.0) & velocity.gt(0)
+
+    frame["decision_eligible"] = ~proxy
+    frame["model_action"] = "WATCH"
+    frame.loc[proxy, "model_action"] = "PROXY ONLY"
+    frame.loc[improving, "model_action"] = "WATCH / IMPROVING"
+    frame.loc[buy, "model_action"] = "BUY CANDIDATE"
+    frame.loc[reduce, "model_action"] = "REDUCE / EXIT"
+
+    frame["decision_reason"] = "Mixed signal"
+    frame.loc[proxy, "decision_reason"] = "Benchmark proxy; not decision-grade"
+    frame.loc[buy, "decision_reason"] = "Leading + RS above benchmark + positive velocity"
+    frame.loc[reduce, "decision_reason"] = "Weakening/Lagging + RS below benchmark + negative velocity"
+    frame.loc[improving, "decision_reason"] = "Improving + RS above benchmark + positive velocity"
+    return frame
+
+
 def metric_row(summary: pd.DataFrame) -> None:
-    total = len(summary)
-    leading = int((summary.get("stage", pd.Series(dtype=str)) == "Leading").sum())
-    improving = int((summary.get("stage", pd.Series(dtype=str)) == "Improving").sum())
-    weakening = int((summary.get("stage", pd.Series(dtype=str)) == "Weakening").sum())
-    lagging = int((summary.get("stage", pd.Series(dtype=str)) == "Lagging").sum())
+    frame = decision_frame(summary)
+    total = len(frame)
+    eligible = int(frame.get("decision_eligible", pd.Series(dtype=bool)).sum())
+    buy = int((frame.get("model_action", pd.Series(dtype=str)) == "BUY CANDIDATE").sum())
+    reduce = int((frame.get("model_action", pd.Series(dtype=str)) == "REDUCE / EXIT").sum())
+    proxy = int((frame.get("model_action", pd.Series(dtype=str)) == "PROXY ONLY").sum())
     cols = st.columns(5)
     cols[0].metric("Exposures", total)
-    cols[1].metric("Leading", leading)
-    cols[2].metric("Improving", improving)
-    cols[3].metric("Weakening", weakening)
-    cols[4].metric("Lagging", lagging)
+    cols[1].metric("Decision-grade", eligible)
+    cols[2].metric("Buy candidates", buy)
+    cols[3].metric("Reduce / exit", reduce)
+    cols[4].metric("Proxy only", proxy)

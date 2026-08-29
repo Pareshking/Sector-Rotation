@@ -1,5 +1,3 @@
-import json
-
 import pandas as pd
 
 from src.data.mfapi import fetch_scheme_history, resolve_scheme_code, search_schemes
@@ -35,3 +33,22 @@ def test_mfapi_history_normalizes_nav(monkeypatch, tmp_path):
     assert isinstance(result.frame.index, pd.DatetimeIndex)
     assert float(result.frame.iloc[-1]["adjusted_close"]) == 123.45
     assert result.scheme_name == "CPSE ETF"
+
+
+def test_mfapi_adjusted_close_repairs_persistent_unit_split(monkeypatch, tmp_path):
+    dates = pd.bdate_range("2026-01-01", periods=50)
+    values = [100.0 + i for i in range(25)] + [12.5 + i * 0.125 for i in range(25)]
+    payload = {
+        "meta": {"scheme_name": "Synthetic ETF"},
+        "data": [
+            {"date": d.strftime("%d-%m-%Y"), "nav": f"{v:.4f}"}
+            for d, v in zip(reversed(dates), reversed(values))
+        ],
+    }
+    monkeypatch.setattr("src.data.mfapi.requests.get", lambda *args, **kwargs: _Response(payload))
+    result = fetch_scheme_history(999999, cache_dir=tmp_path)
+    raw = result.frame["close"]
+    adjusted = result.frame["adjusted_close"]
+    assert raw.iloc[24] > 100
+    assert raw.iloc[25] < 20
+    assert adjusted.iloc[24] / adjusted.iloc[25] < 1.5

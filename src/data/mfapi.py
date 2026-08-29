@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,44 @@ class MFAPIResult:
     scheme_code: int
     scheme_name: str
     source: str = "mfapi"
+
+
+def _repair_level_shifts(series: pd.Series) -> pd.Series:
+    """Back-adjust extreme persistent NAV unit changes.
+
+    MFAPI supplies scheme NAVs but does not expose ETF/scheme corporate-action
+    adjustment factors. A 10:1 unit split can therefore appear as a 90% crash.
+    We only correct persistent level shifts of >=2.5x or <=0.4x, which is well
+    outside normal daily equity volatility, and leave the raw `close` column
+    untouched for auditability.
+    """
+    clean = pd.to_numeric(series, errors="coerce").dropna().astype(float).sort_index().copy()
+    if len(clean) < 25:
+        return clean
+    for _ in range(4):
+        values = clean.to_numpy(copy=True)
+        changed = False
+        for i in range(10, len(values) - 10):
+            previous = float(values[i - 1])
+            current = float(values[i])
+            if previous <= 0 or current <= 0:
+                continue
+            day_ratio = current / previous
+            pre = float(pd.Series(values[i - 10:i]).median())
+            post = float(pd.Series(values[i:i + 10]).median())
+            if pre <= 0:
+                continue
+            level_ratio = post / pre
+            if not (level_ratio >= 2.5 or level_ratio <= 0.4):
+                continue
+            if abs(math.log(day_ratio / level_ratio)) > 0.18:
+                continue
+            clean.iloc[:i] *= level_ratio
+            changed = True
+            break
+        if not changed:
+            break
+    return clean
 
 
 def _get_json(
@@ -140,6 +180,7 @@ def fetch_scheme_history(
     frame = pd.DataFrame(records, columns=["date", "close", "adjusted_close"])
     if not frame.empty:
         frame = frame.drop_duplicates("date").set_index("date").sort_index()
+        frame["adjusted_close"] = _repair_level_shifts(frame["adjusted_close"])
     name = str(meta.get("scheme_name") or meta.get("schemeName") or code)
     return MFAPIResult(frame=frame, scheme_code=code, scheme_name=name)
 
