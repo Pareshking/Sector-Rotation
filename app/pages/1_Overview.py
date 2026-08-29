@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import streamlit as st
-from app.streamlit_app import load_summary
-from app.components.metrics import metric_row
+
 from app.components.charts import ranking_bar, rrg_quadrant
+from app.components.metrics import data_health_banner, load_metadata, metric_row
+from app.streamlit_app import load_summary
 
 st.title("Overview")
+data_health_banner(load_metadata())
 summary = load_summary()
 if summary.empty:
     st.warning("No prepared dataset found. Run the data pipeline first.")
