@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
 OUTPUT = ROOT / "data" / "processed"
 
+MIN_DECISION_OBSERVATIONS = 250
+
 # Official Nifty/NSE histories remain first priority. Explicitly matched ETF/NAV
 # histories are also decision-grade canonical benchmarks when the official web
 # history is unavailable. They are not inferred by similarity or category.
@@ -27,6 +29,7 @@ AUTHORITATIVE_CANONICAL_SOURCES = {
     "niftyindices_pr",
     "nse_api",
     "nse_archive",
+    "niftyindices_jugaad",
     "etf_nav_authoritative",
 }
 
@@ -117,7 +120,7 @@ def build_live(registry):
     if benchmark_frame.empty:
         raise RuntimeError("Unable to download Nifty 50 benchmark history")
     benchmark = benchmark_frame.iloc[:, 0]
-    valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= 60]
+    valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= MIN_DECISION_OBSERVATIONS]
     skipped = [e.id for e in registry.all() if e.id not in valid]
     source_counts = {k: sum(v == k for v in source_by_exposure.values()) for k in ("niftyindices_tri", "niftyindices_pr", "nse_api", "nse_archive", "etf_nav_authoritative", "yahoo", "seed_cache")}
     source_counts["nse"] = source_counts["niftyindices_tri"] + source_counts["niftyindices_pr"] + source_counts["nse_api"] + source_counts["nse_archive"]

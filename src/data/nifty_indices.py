@@ -18,6 +18,11 @@ try:
 except ImportError:  # pragma: no cover
     cloudscraper = None
 
+try:
+    from jugaad_data.nse import index_df as _jugaad_index_df
+except ImportError:  # pragma: no cover
+    _jugaad_index_df = None
+
 from src.data.cache import read_json_cache, write_json_cache
 
 BASE_URL = "https://www.niftyindices.com"
@@ -284,6 +289,25 @@ def _request_history(name, start, end, timeout=DEFAULT_TIMEOUT, tri=True):
     return _rows_to_series(name, _request_endpoint(TRI_ENDPOINTS if tri else PRICE_ENDPOINTS, name, start, end, timeout), tri=tri)
 
 
+def _fetch_jugaad_index_history(name, start, end):
+    if _jugaad_index_df is None:
+        return pd.Series(dtype="float64", name=name)
+    try:
+        frame = _jugaad_index_df(symbol=name, from_date=start, to_date=end)
+        if frame is None or frame.empty or "HistoricalDate" not in frame.columns or "CLOSE" not in frame.columns:
+            return pd.Series(dtype="float64", name=name)
+        dates = pd.to_datetime(frame["HistoricalDate"], errors="coerce", dayfirst=True)
+        values = pd.to_numeric(frame["CLOSE"].astype("string").str.replace(",", "", regex=False), errors="coerce")
+        valid = dates.notna() & values.notna() & values.gt(0)
+        series = pd.Series(values.loc[valid].to_numpy(float), index=pd.DatetimeIndex(dates.loc[valid]), name=name).groupby(level=0).last().sort_index()
+        if len(series) >= MIN_OBSERVATIONS:
+            series.attrs.update(source="niftyindices_jugaad", resolved_name=name)
+            return series
+    except Exception:
+        pass
+    return pd.Series(dtype="float64", name=name)
+
+
 def fetch_nifty_index_history(name, years=5, start=None, end=None, retries=1, timeout=DEFAULT_TIMEOUT, catalogue=None):
     end_date, end_start = end or date.today(), start or (end or date.today()) - timedelta(days=365 * years + 10)
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)
@@ -297,8 +321,11 @@ def fetch_nifty_index_history(name, years=5, start=None, end=None, retries=1, ti
             if len(pr.dropna()) >= MIN_OBSERVATIONS:
                 pr.attrs.update(source="niftyindices_pr", resolved_name=candidate)
                 return pr
+    for candidate in resolve_index_names(name, catalogue_frame):
+        series = _fetch_jugaad_index_history(candidate, end_start, end_date)
+        if not series.empty:
+            return series
     return pd.Series(dtype="float64", name=name)
-
 
 def fetch_nse_api_index_history(name, start, end, timeout=DEFAULT_TIMEOUT, catalogue=None):
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)

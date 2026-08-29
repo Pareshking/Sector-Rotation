@@ -10,3 +10,4 @@ cloudscraper>=1.2.71,<2
 scipy>=1.13,<2
 pytest>=8,<9
 ruff>=0.12,<1
+jugaad-data==0.35.5
