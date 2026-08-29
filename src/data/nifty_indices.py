@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from difflib import SequenceMatcher
@@ -11,17 +10,21 @@ from io import StringIO
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-import cloudscraper
 import pandas as pd
 import requests
 
+try:
+    import cloudscraper
+except ImportError:  # pragma: no cover - optional hardening dependency
+    cloudscraper = None
+
 from src.data.cache import read_json_cache, write_json_cache
 
-BASE_URL = "https://www.niftyindices.com"
+BASE_URLS = ("https://www.niftyindices.com", "https://niftyindices.com")
+BASE_URL = BASE_URLS[0]
 HISTORICAL_PAGE = f"{BASE_URL}/reports/historical-data"
-PRICE_ENDPOINTS = (f"{BASE_URL}/Backpage.aspx/getHistoricaldatatabletoString",)
-TRI_ENDPOINTS = (f"{BASE_URL}/Backpage.aspx/getTotalReturnIndexString",)
-TYPE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypedata1"
+PRICE_ENDPOINTS = tuple(f"{base}/Backpage.aspx/getHistoricaldatatabletoString" for base in BASE_URLS)
+TRI_ENDPOINTS = tuple(f"{base}/Backpage.aspx/getTotalReturnIndexString" for base in BASE_URLS)
 SUBTYPE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypeSubindexdata"
 INDEX_CATALOGUE_ENDPOINT = f"{BASE_URL}/Backpage.aspx/gethistoricaltypeindexdata"
 NSE_API_URL = "https://www.nseindia.com/api/historical/indicesHistory"
@@ -29,25 +32,30 @@ NSE_ARCHIVE_URLS = (
     "https://archives.nseindia.com/content/indices/ind_close_all_{date}.csv",
     "https://nsearchives.nseindia.com/content/indices/ind_close_all_{date}.csv",
 )
-ARCHIVE_FALLBACK_DAYS = 400
+
 MIN_OBSERVATIONS = 60
-DEFAULT_TIMEOUT = 15
+DEFAULT_TIMEOUT = (5, 10)
 CATALOGUE_CACHE_DIR = Path("data") / ".cache" / "niftyindices"
 CATALOGUE_CACHE_FILE = CATALOGUE_CACHE_DIR / "index_catalogue.json"
 CATALOGUE_CACHE_SECONDS = 24 * 60 * 60
+ARCHIVE_FALLBACK_DAYS = 100
+
 HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Connection": "keep-alive",
     "Content-Type": "application/json; charset=UTF-8",
     "Origin": BASE_URL,
     "Referer": HISTORICAL_PAGE,
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "X-Requested-With": "XMLHttpRequest",
 }
 NSE_HEADERS = {
     "User-Agent": HEADERS["User-Agent"],
     "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": HEADERS["Accept-Language"],
     "Referer": "https://www.nseindia.com/",
-    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
 }
 
 INDEX_NAME_ALIASES: dict[str, str] = {
@@ -101,12 +109,27 @@ INDEX_NAME_ALIASES: dict[str, str] = {
     "reit-invit": "NIFTY REITS & INVITS",
     "nifty reits & invits": "NIFTY REITS & INVITS",
 }
-
 INDEX_NAME_ALTERNATES: dict[str, tuple[str, ...]] = {
     "healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
     "nifty healthcare": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
     "healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
     "nifty healthcare index": ("NIFTY HEALTHCARE", "NIFTY HEALTHCARE INDEX"),
+}
+
+# Only symbols that are established Yahoo index symbols are included. Newer/thematic
+# indices deliberately remain on official Nifty/NSE paths rather than substituting an ETF.
+YAHOO_INDEX_SYMBOLS: dict[str, str] = {
+    "auto": "^CNXAUTO",
+    "bank": "^NSEBANK",
+    "financial-services": "^CNXFINANCE",
+    "fmcg": "^CNXFMCG",
+    "it": "^CNXIT",
+    "media": "^CNXMEDIA",
+    "metal": "^CNXMETAL",
+    "pharma": "^CNXPHARMA",
+    "psu-bank": "^CNXPSUBANK",
+    "realty": "^CNXREALTY",
+    "oil-gas": "^CNXENERGY",
 }
 
 AUTHORITATIVE_CATALOGUE_SEED: tuple[tuple[str, str], ...] = (
@@ -166,8 +189,22 @@ def _parse_api_payload(payload: object) -> list[object]:
     return []
 
 
-def _post_json(url: str, payload: object, timeout: int = DEFAULT_TIMEOUT) -> list[object]:
-    response = requests.post(url, headers=HEADERS, json=payload, timeout=timeout)
+def _make_session() -> requests.Session:
+    if cloudscraper is not None:
+        session = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "windows", "mobile": False})
+    else:
+        session = requests.Session()
+    session.headers.update(HEADERS)
+    try:
+        session.get(HISTORICAL_PAGE, headers=HEADERS, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
+    except requests.RequestException:
+        pass
+    return session
+
+
+def _post_json(url: str, payload: object, timeout: int | tuple[float, float] = DEFAULT_TIMEOUT) -> list[object]:
+    session = _make_session()
+    response = session.post(url, headers=HEADERS, json=payload, timeout=timeout)
     response.raise_for_status()
     return _parse_api_payload(response.json())
 
@@ -194,7 +231,7 @@ def _merge_catalogues(*frames: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["name", "category"])
 
 
-def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.DataFrame:
+def _discover_index_catalogue_uncached(timeout: int | tuple[float, float] = DEFAULT_TIMEOUT) -> pd.DataFrame:
     subtypes: list[str] = []
     try:
         top = _post_json(SUBTYPE_ENDPOINT, {"cinfo": {"indextype": "Equity", "indexgroup": ""}}, timeout=timeout)
@@ -213,8 +250,9 @@ def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.Dat
     records: list[dict[str, str]] = []
     seen: set[str] = set()
     for subtype in dict.fromkeys(subtypes):
+        payload = {"cinfo": {"indextype": subtype, "indexgroup": "Equity"}}
         try:
-            rows = _post_json(INDEX_CATALOGUE_ENDPOINT, {"cinfo": {"indextype": subtype, "indexgroup": "Equity"}}, timeout=timeout)
+            rows = _post_json(INDEX_CATALOGUE_ENDPOINT, payload, timeout=timeout)
         except (requests.RequestException, ValueError, json.JSONDecodeError):
             rows = []
         for row in rows:
@@ -233,11 +271,11 @@ def _discover_index_catalogue_uncached(timeout: int = DEFAULT_TIMEOUT) -> pd.Dat
 
 
 @lru_cache(maxsize=8)
-def _discover_index_catalogue_memory(timeout: int) -> pd.DataFrame:
+def _discover_index_catalogue_memory(timeout: int | tuple[float, float]) -> pd.DataFrame:
     return _discover_index_catalogue_uncached(timeout=timeout)
 
 
-def discover_index_catalogue(timeout: int = DEFAULT_TIMEOUT, cache_seconds: int = CATALOGUE_CACHE_SECONDS, force_refresh: bool = False) -> pd.DataFrame:
+def discover_index_catalogue(timeout: int | tuple[float, float] = DEFAULT_TIMEOUT, cache_seconds: int = CATALOGUE_CACHE_SECONDS, force_refresh: bool = False) -> pd.DataFrame:
     if not force_refresh:
         cached = read_json_cache(CATALOGUE_CACHE_FILE, max_age_seconds=cache_seconds)
         if isinstance(cached, dict) and isinstance(cached.get("records"), list):
@@ -256,10 +294,8 @@ def discover_index_catalogue(timeout: int = DEFAULT_TIMEOUT, cache_seconds: int 
 
 def resolve_catalogue_name(name: str, catalogue: pd.DataFrame | None = None) -> str | None:
     requested = _canonical_name(name)
-    requested_norm = normalize_index_name(requested)
     alias_target = INDEX_NAME_ALIASES.get(str(name).strip().casefold())
-    if alias_target:
-        requested_norm = normalize_index_name(alias_target)
+    requested_norm = normalize_index_name(alias_target or requested)
     if catalogue is None or catalogue.empty:
         return alias_target or requested
     names = [str(value) for value in catalogue.get("name", pd.Series(dtype=str)).dropna()]
@@ -269,9 +305,10 @@ def resolve_catalogue_name(name: str, catalogue: pd.DataFrame | None = None) -> 
     exact = normalized.get(requested_norm)
     if exact:
         return exact
-    alias_norm = normalize_index_name(alias_target) if alias_target else ""
-    if alias_norm and alias_norm in normalized:
-        return normalized[alias_norm]
+    if alias_target:
+        alias_match = normalized.get(normalize_index_name(alias_target))
+        if alias_match:
+            return alias_match
     request_tokens = set(requested_norm.split())
     scored: list[tuple[float, str]] = []
     for candidate in names:
@@ -300,22 +337,18 @@ def resolve_index_names(name: str, catalogue: pd.DataFrame | None = None) -> lis
     return list(dict.fromkeys(candidates))
 
 
-def _make_session() -> cloudscraper.CloudScraper:
-    return cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux", "mobile": False})
-
-
-def _request_endpoint(endpoint_candidates: Sequence[str], name: str, start: date, end: date, timeout: int) -> list[dict[str, object]]:
+def _request_endpoint(endpoint_candidates: Sequence[str], name: str, start: date, end: date, timeout: int | tuple[float, float]) -> list[dict[str, object]]:
     payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (name, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), name)}
-    session = _make_session()
     last_error: Exception | None = None
     for endpoint in endpoint_candidates:
+        session = _make_session()
         try:
             response = session.post(endpoint, headers=HEADERS, json=payload, timeout=timeout)
             response.raise_for_status()
             rows = _parse_api_payload(response.json())
             if rows:
                 return [row for row in rows if isinstance(row, dict)]
-        except (requests.RequestException, json.JSONDecodeError) as exc:
+        except (requests.RequestException, json.JSONDecodeError, ValueError) as exc:
             last_error = exc
     if last_error:
         raise RuntimeError(f"NiftyIndices endpoint failed for {name!r}: {last_error}") from last_error
@@ -347,11 +380,11 @@ def _rows_to_series(name: str, rows: list[dict[str, object]], tri: bool = False)
     return series[~series.index.duplicated(keep="last")].sort_index()
 
 
-def _request_history(name: str, start: date, end: date, timeout: int, tri: bool) -> pd.Series:
+def _request_history(name: str, start: date, end: date, timeout: int | tuple[float, float], tri: bool) -> pd.Series:
     return _rows_to_series(name, _request_endpoint(TRI_ENDPOINTS if tri else PRICE_ENDPOINTS, name, start, end, timeout), tri=tri)
 
 
-def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 1, timeout: int = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
+def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = None, end: date | None = None, retries: int = 1, timeout: int | tuple[float, float] = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
     end_date = end or date.today()
     start_date = start or (end_date - timedelta(days=365 * years + 10))
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)
@@ -372,15 +405,14 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
                     return price_series
             except (RuntimeError, requests.RequestException, ValueError) as exc:
                 last_error = exc
-        if attempt < retries:
-            time.sleep(1.0 * attempt)
     raise RuntimeError(f"Nifty Indices request failed for {name!r}: {last_error or 'no usable history'}")
 
 
-def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
+def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int | tuple[float, float] = DEFAULT_TIMEOUT, catalogue: pd.DataFrame | None = None) -> pd.Series:
     session = requests.Session()
+    session.headers.update(NSE_HEADERS)
     try:
-        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
+        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=DEFAULT_TIMEOUT)
     except requests.RequestException:
         pass
     catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)
@@ -424,12 +456,9 @@ def fetch_nse_api_indices(names: Mapping[str, str], start: date, end: date, work
     return pd.DataFrame(results).sort_index(), unresolved
 
 
-def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.DataFrame:
+def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int | tuple[float, float]) -> pd.DataFrame:
     session = requests.Session()
-    try:
-        session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=5)
-    except requests.RequestException:
-        pass
+    session.headers.update(NSE_HEADERS)
     content: bytes | None = None
     for template in NSE_ARCHIVE_URLS:
         try:
@@ -449,21 +478,22 @@ def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.
         selected = frame[frame["_canonical"].isin(wanted)].copy()
         if selected.empty:
             return pd.DataFrame()
-        selected["date"] = pd.to_datetime(selected["Index Date"], format="%d-%b-%Y", errors="coerce")
-        selected["date"] = selected["date"].fillna(pd.to_datetime(selected["Index Date"], format="%d-%m-%Y", errors="coerce"))
+        raw_date = selected["Index Date"].astype("string")
+        selected["date"] = pd.to_datetime(raw_date, format="%d-%b-%Y", errors="coerce").fillna(pd.to_datetime(raw_date, format="%d-%m-%Y", errors="coerce"))
         selected["close"] = pd.to_numeric(selected["Closing Index Value"], errors="coerce")
         return selected.dropna(subset=["date", "close"])[["_canonical", "date", "close"]]
     except (UnicodeDecodeError, ValueError, pd.errors.ParserError):
         return pd.DataFrame()
 
 
-def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int = 8, workers: int = 6) -> pd.DataFrame:
+def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, timeout: int | tuple[float, float] = DEFAULT_TIMEOUT, workers: int = 12) -> pd.DataFrame:
     wanted = {_canonical_name(name): name for name in names}
     if not wanted:
         return pd.DataFrame()
+    days = list(pd.bdate_range(start=max(start, end - timedelta(days=ARCHIVE_FALLBACK_DAYS)), end=end))
     rows: list[pd.DataFrame] = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(_fetch_archive_day, day, set(wanted), timeout) for day in pd.bdate_range(start=start, end=end)]
+        futures = [executor.submit(_fetch_archive_day, day, set(wanted), timeout) for day in days]
         for future in as_completed(futures):
             frame = future.result()
             if not frame.empty:
@@ -472,6 +502,41 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
         return pd.DataFrame()
     all_rows = pd.concat(rows, ignore_index=True).drop_duplicates(subset=["_canonical", "date"])
     return pd.DataFrame({original: all_rows.loc[all_rows["_canonical"].eq(canonical)].set_index("date")["close"].sort_index() for canonical, original in wanted.items() if not all_rows.loc[all_rows["_canonical"].eq(canonical)].empty}).sort_index()
+
+
+def _fetch_yahoo_fallback(names: Mapping[str, str], years: int) -> tuple[pd.DataFrame, dict[str, str]]:
+    if not names:
+        return pd.DataFrame(), {}
+    try:
+        import yfinance as yf
+    except ImportError:
+        return pd.DataFrame(), {}
+    symbols = {exposure_id: YAHOO_INDEX_SYMBOLS.get(exposure_id) for exposure_id in names}
+    symbols = {key: value for key, value in symbols.items() if value}
+    if not symbols:
+        return pd.DataFrame(), {}
+    start = date.today() - timedelta(days=365 * years + 10)
+    try:
+        market = yf.download(list(symbols.values()), start=start.isoformat(), end=(date.today() + timedelta(days=1)).isoformat(), auto_adjust=True, progress=False, group_by="column", threads=True, timeout=10)
+    except Exception:
+        return pd.DataFrame(), {}
+    if market.empty:
+        return pd.DataFrame(), {}
+    if isinstance(market.columns, pd.MultiIndex):
+        close = market["Close"] if "Close" in market.columns.get_level_values(0) else market.xs("Close", axis=1, level=0)
+    else:
+        close = market[["Close"]].rename(columns={"Close": next(iter(symbols.values()))})
+    close.index = pd.to_datetime(close.index).tz_localize(None)
+    result: dict[str, pd.Series] = {}
+    source: dict[str, str] = {}
+    for exposure_id, symbol in symbols.items():
+        if symbol not in close:
+            continue
+        series = close[symbol].dropna()
+        if series.size >= MIN_OBSERVATIONS:
+            result[exposure_id] = series.rename(exposure_id)
+            source[exposure_id] = "yahoo"
+    return pd.DataFrame(result).sort_index(), source
 
 
 def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], existing: pd.DataFrame | None = None, years: int = 5) -> pd.DataFrame:
@@ -489,7 +554,7 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
             series = pd.Series(dtype="float64", name=index_name)
         return exposure_id, index_name, series
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(fetch_one, exposure_id, index_name) for exposure_id, index_name in mapping.items() if exposure_id not in frame.columns or frame[exposure_id].dropna().size < MIN_OBSERVATIONS]
         for future in as_completed(futures):
             exposure_id, index_name, fetched = future.result()
@@ -507,15 +572,28 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
             for exposure_id in api_frame.columns:
                 source_by_exposure[exposure_id] = "nse_api"
                 resolved_by_exposure[exposure_id] = resolve_catalogue_name(mapping[exposure_id], catalogue=catalogue) or mapping[exposure_id]
-        if unresolved:
-            archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS), end=date.today())
-            for exposure_id, index_name in unresolved.items():
-                candidates = resolve_index_names(index_name, catalogue=catalogue)
-                matched = next((candidate for candidate in candidates if candidate in archive.columns), None)
-                if matched is not None and archive[matched].dropna().size >= MIN_OBSERVATIONS:
-                    frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[matched].rename(exposure_id), how="outer")
-                    source_by_exposure[exposure_id] = "nse_archive"
-                    resolved_by_exposure[exposure_id] = matched
+            missing = {key: value for key, value in missing.items() if key not in api_frame.columns}
+        else:
+            unresolved = missing
+
+    if missing:
+        yahoo_frame, yahoo_sources = _fetch_yahoo_fallback(missing, years=years)
+        if not yahoo_frame.empty:
+            frame = frame.join(yahoo_frame, how="outer")
+            for exposure_id in yahoo_frame.columns:
+                source_by_exposure[exposure_id] = yahoo_sources.get(exposure_id, "yahoo")
+                resolved_by_exposure[exposure_id] = mapping[exposure_id]
+            missing = {key: value for key, value in missing.items() if key not in yahoo_frame.columns}
+
+    if missing:
+        archive = fetch_nse_archive_indices(missing.values(), start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS), end=date.today())
+        for exposure_id, index_name in list(missing.items()):
+            candidates = resolve_index_names(index_name, catalogue=catalogue)
+            matched = next((candidate for candidate in candidates if candidate in archive.columns), None)
+            if matched is not None and archive[matched].dropna().size >= MIN_OBSERVATIONS:
+                frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[matched].rename(exposure_id), how="outer")
+                source_by_exposure[exposure_id] = "nse_archive"
+                resolved_by_exposure[exposure_id] = matched
 
     for exposure_id in mapping:
         if exposure_id in frame.columns and frame[exposure_id].dropna().size >= MIN_OBSERVATIONS:
