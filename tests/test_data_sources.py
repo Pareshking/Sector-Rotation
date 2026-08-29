@@ -17,11 +17,16 @@ class _Response:
         ])}
 
 
-def test_nifty_indices_parser(monkeypatch) -> None:
-    def fake_post(*args, **kwargs):
+class _Session:
+    def get(self, *args, **kwargs):
         return _Response()
 
-    monkeypatch.setattr("src.data.nifty_indices.requests.post", fake_post)
+    def post(self, *args, **kwargs):
+        return _Response()
+
+
+def test_nifty_indices_parser(monkeypatch) -> None:
+    monkeypatch.setattr("src.data.nifty_indices.cloudscraper.create_scraper", lambda **kwargs: _Session())
     series = fetch_nifty_index_history("Nifty Financial Services", start=date(2026, 8, 27), end=date(2026, 8, 28))
     assert isinstance(series, pd.Series)
     assert len(series) == 2
