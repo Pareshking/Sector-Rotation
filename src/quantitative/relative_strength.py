@@ -3,19 +3,21 @@ from __future__ import annotations
 import pandas as pd
 
 
-def relative_strength(asset: pd.Series, benchmark: pd.Series) -> pd.Series:
+def relative_strength(asset: pd.Series, benchmark: pd.Series, weekly: bool = True) -> pd.Series:
     joined = pd.concat([asset.rename("asset"), benchmark.rename("benchmark")], axis=1).dropna()
+    if weekly:
+        joined = joined.resample("W-FRI").last().dropna()
     return joined["asset"] / joined["benchmark"]
 
 
-def mansfield_relative_strength(asset: pd.Series, benchmark: pd.Series, window: int = 52) -> pd.Series:
-    rs = relative_strength(asset, benchmark)
+def mansfield_relative_strength(asset: pd.Series, benchmark: pd.Series, window: int = 52, weekly: bool = True) -> pd.Series:
+    rs = relative_strength(asset, benchmark, weekly=weekly)
     baseline = rs.rolling(window, min_periods=window).mean()
     return ((rs / baseline) - 1.0) * 100.0
 
 
-def rs_ratio(asset: pd.Series, benchmark: pd.Series, window: int = 52) -> pd.Series:
-    rs = relative_strength(asset, benchmark)
+def rs_ratio(asset: pd.Series, benchmark: pd.Series, window: int = 52, weekly: bool = True) -> pd.Series:
+    rs = relative_strength(asset, benchmark, weekly=weekly)
     baseline = rs.rolling(window, min_periods=window).mean()
     return rs / baseline
 
