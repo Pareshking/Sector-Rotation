@@ -109,10 +109,12 @@ def render_compact_table(frame: pd.DataFrame, columns: Iterable[tuple[str, str]]
     if frame.empty:
         st.info("No data available.")
         return
-    display = frame.head(limit).copy()
-    for key, _ in columns:
+    column_pairs = [(key, label) for key, label in columns if key in frame.columns]
+    display = frame.head(limit)[[key for key, _ in column_pairs]].copy()
+    for key, _ in column_pairs:
         if key.startswith("return_") and key in display:
             display[key] = display[key].map(fmt_pct)
         elif key in {"momentum_z", "rs_ratio", "rs_momentum"} and key in display:
             display[key] = display[key].map(fmt_num)
-    st.dataframe(display[[key for key, _ in columns if key in display.columns]], width="stretch", hide_index=True)
+    display = display.rename(columns=dict(column_pairs))
+    st.dataframe(display, width="stretch", hide_index=True)
