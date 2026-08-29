@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from io import StringIO
 from typing import Iterable, Mapping
 
+import cloudscraper
 import pandas as pd
 import requests
 
@@ -26,7 +27,7 @@ def _canonical_name(name: str) -> str:
 def _request(name: str, start: date, end: date, timeout: int = 45) -> list[dict[str, object]]:
     canonical = _canonical_name(name)
     payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (canonical, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), canonical)}
-    session = requests.Session()
+    session = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux", "mobile": False})
     try:
         session.get(HISTORICAL_PAGE, headers={"User-Agent": HEADERS["User-Agent"]}, timeout=8)
     except requests.RequestException:
@@ -69,7 +70,6 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
 
 
 def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = 15) -> pd.Series:
-    """Fetch a date-range history from NSE's official historical index API."""
     session = requests.Session()
     session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
     response = session.get(NSE_API_URL, params={"indexType": name, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
@@ -155,19 +155,16 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
     frame = existing.copy() if existing is not None else pd.DataFrame()
     missing: dict[str, str] = {}
     nifty_available = True
-    items = list(mapping.items())
-    for position, (exposure_id, index_name) in enumerate(items):
+    for exposure_id, index_name in mapping.items():
         series = frame[exposure_id] if exposure_id in frame.columns else pd.Series(dtype="float64")
         if series.dropna().size >= 60:
             continue
+        fetched = pd.Series(dtype="float64")
         if nifty_available:
             try:
                 fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
             except RuntimeError:
                 nifty_available = False
-                fetched = pd.Series(dtype="float64")
-        else:
-            fetched = pd.Series(dtype="float64")
         if fetched.dropna().size >= 60:
             frame = frame.drop(columns=[exposure_id], errors="ignore").join(fetched.rename(exposure_id), how="outer")
         else:
