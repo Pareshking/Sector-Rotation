@@ -7,8 +7,8 @@ import pandas as pd
 
 from src.data.amfi import fetch_amfi_nav
 from src.data.amfi_history import fetch_amfi_history, find_scheme_codes
-from src.data.mfapi import fetch_etf_nav
 from src.data.index_data import download_history
+from src.data.mfapi import fetch_etf_nav
 from src.models.exposure import ETFMapping
 
 
@@ -32,42 +32,50 @@ def _amfi_fallback(etf: ETFMapping, days: int = 90) -> pd.Series:
 
 
 def fetch_etf_histories(etfs: Iterable[ETFMapping], years: int = 5) -> tuple[pd.DataFrame, dict[str, str], dict[str, int]]:
-    """Build ETF history using MFAPI NAV -> Yahoo market close -> AMFI fallback.
-
-    The returned series is NAV-like when MFAPI is available and market-close-like
-    when Yahoo is used. Source labels make this distinction explicit for telemetry.
-    """
+    """Build ETF history using MFAPI NAV -> Yahoo market close -> AMFI fallback."""
     etf_list = list(etfs)
     columns: dict[str, pd.Series] = {}
     sources: dict[str, str] = {}
     resolved_codes: dict[str, int] = {}
-    market_symbols = [etf.yfinance_symbol for etf in etf_list if etf.yfinance_symbol]
-    market = download_market_history(market_symbols, years=years)
-    if not market.empty:
-        reverse = {etf.yfinance_symbol: etf.symbol for etf in etf_list if etf.yfinance_symbol and etf.symbol}
-        for yahoo_symbol, etf_symbol in reverse.items():
-            if yahoo_symbol in market:
-                series = market[yahoo_symbol].dropna()
-                if not series.empty:
-                    columns[etf_symbol] = series.rename(etf_symbol)
-                    sources[etf_symbol] = "yahoo"
+
+    # Track B primary: MFAPI provides the complete NAV history, independent of
+    # exchange liquidity and zero-volume trading sessions.
+    unresolved: list[ETFMapping] = []
     for etf in etf_list:
         key = etf.symbol or etf.name
         try:
             result = fetch_etf_nav(key, scheme_code=etf.scheme_code, expected_name=etf.name)
-            if not result.frame.empty:
+            if not result.frame.empty and result.frame["adjusted_close"].dropna().size >= 20:
                 columns[key] = result.frame["adjusted_close"].rename(key)
                 sources[key] = "mfapi"
                 resolved_codes[key] = result.scheme_code
                 continue
         except Exception:
             pass
-        if key not in columns or columns[key].dropna().size < 20:
-            try:
-                fallback = _amfi_fallback(etf)
-            except Exception:
-                fallback = pd.Series(dtype="float64", name=key)
-            if not fallback.empty:
-                columns[key] = fallback
-                sources[key] = "amfi"
+        unresolved.append(etf)
+
+    # Secondary: exchange close, useful for the traded-price/liquidity leg and
+    # for instruments whose MFAPI scheme cannot yet be resolved.
+    market_symbols = [etf.yfinance_symbol for etf in unresolved if etf.yfinance_symbol]
+    market = download_market_history(market_symbols, years=years)
+    if not market.empty:
+        reverse = {etf.yfinance_symbol: etf.symbol or etf.name for etf in unresolved if etf.yfinance_symbol}
+        for yahoo_symbol, etf_key in reverse.items():
+            if yahoo_symbol in market and market[yahoo_symbol].dropna().size >= 20:
+                columns[etf_key] = market[yahoo_symbol].dropna().rename(etf_key)
+                sources[etf_key] = "yahoo"
+
+    # Emergency: official AMFI NAV text/history for any remaining instruments.
+    for etf in unresolved:
+        key = etf.symbol or etf.name
+        if key in columns:
+            continue
+        try:
+            fallback = _amfi_fallback(etf)
+        except Exception:
+            fallback = pd.Series(dtype="float64", name=key)
+        if not fallback.empty:
+            columns[key] = fallback
+            sources[key] = "amfi"
+
     return pd.DataFrame(columns).sort_index(), sources, resolved_codes
