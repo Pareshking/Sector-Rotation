@@ -24,17 +24,26 @@ def rank_exposures(prices: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
         asset = prices[name].dropna()
         row: dict[str, float | str] = {"exposure": name}
         for label, days in LOOKBACK_DAYS.items():
-            row[f"return_{label}"] = (period := _safe_return(asset, days))
+            row[f"return_{label}"] = _safe_return(asset, days)
             row[f"relative_{label}"] = dual_momentum(asset, benchmark, days)
         rows.append(row)
+
     frame = pd.DataFrame(rows).set_index("exposure")
     for label in LOOKBACK_DAYS:
         frame[f"z_{label}"] = cross_sectional_zscore(frame[f"relative_{label}"])
         frame[f"percentile_{label}"] = percentile_rank(frame[f"relative_{label}"])
+
     zcols = [f"z_{x}" for x in LOOKBACK_DAYS]
     frame["momentum_z"] = frame[zcols].mean(axis=1, skipna=True)
-    frame["rank"] = frame["momentum_z"].rank(ascending=False, method="min")
-    return frame.sort_values("rank")
+
+    # Rank is an ordinal presentation field. Equal scores still receive a
+    # deterministic unique position so the dashboard never shows misleading
+    # duplicate ranks. The score itself remains unchanged.
+    ordered = frame.sort_values(
+        ["momentum_z"], ascending=False, kind="mergesort", na_position="last"
+    )
+    ordered["rank"] = pd.Series(range(1, len(ordered) + 1), index=ordered.index, dtype="int64")
+    return ordered
 
 
 def _safe_return(series: pd.Series, days: int) -> float:
