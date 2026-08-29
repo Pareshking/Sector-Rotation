@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import StringIO
 from typing import Iterable, Mapping
-from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -73,15 +72,33 @@ def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int 
     """Fetch a date-range history from NSE's official historical index API."""
     session = requests.Session()
     session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
-    params = {"indexType": name, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}
-    response = session.get(NSE_API_URL, params=params, headers=NSE_HEADERS, timeout=timeout)
+    response = session.get(NSE_API_URL, params={"indexType": name, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     data = payload.get("data", {}) if isinstance(payload, dict) else {}
     rows = data.get("indexCloseOnlineRecords", []) if isinstance(data, dict) else []
-    if not isinstance(rows, list):
-        return pd.Series(dtype="float64", name=name)
-    return _rows_to_series(name, rows)
+    return _rows_to_series(name, rows) if isinstance(rows, list) else pd.Series(dtype="float64", name=name)
+
+
+def _api_fetch_one(exposure_id: str, index_name: str, start: date, end: date) -> tuple[str, str, pd.Series]:
+    try:
+        return exposure_id, index_name, fetch_nse_api_index_history(index_name, start, end)
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        return exposure_id, index_name, pd.Series(dtype="float64", name=index_name)
+
+
+def fetch_nse_api_indices(names: Mapping[str, str], start: date, end: date, workers: int = 6) -> tuple[pd.DataFrame, dict[str, str]]:
+    results: dict[str, pd.Series] = {}
+    unresolved: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_api_fetch_one, exposure_id, index_name, start, end) for exposure_id, index_name in names.items()]
+        for future in as_completed(futures):
+            exposure_id, index_name, series = future.result()
+            if series.dropna().size >= 60:
+                results[exposure_id] = series.rename(exposure_id)
+            else:
+                unresolved[exposure_id] = index_name
+    return pd.DataFrame(results).sort_index(), unresolved
 
 
 def _fetch_archive_day(day: pd.Timestamp, wanted: set[str], timeout: int) -> pd.DataFrame:
@@ -120,10 +137,9 @@ def fetch_nse_archive_indices(names: Iterable[str], start: date, end: date, time
     wanted = {_canonical_name(name): name for name in names}
     if not wanted:
         return pd.DataFrame()
-    days = list(pd.bdate_range(start=start, end=end))
     rows: list[pd.DataFrame] = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(_fetch_archive_day, day, set(wanted), timeout) for day in days]
+        futures = [executor.submit(_fetch_archive_day, day, set(wanted), timeout) for day in pd.bdate_range(start=start, end=end)]
         for future in as_completed(futures):
             frame = future.result()
             if not frame.empty:
@@ -154,18 +170,15 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
             fetched = pd.Series(dtype="float64")
         if fetched.dropna().size >= 60:
             frame = frame.drop(columns=[exposure_id], errors="ignore").join(fetched.rename(exposure_id), how="outer")
-            continue
-        try:
-            api_series = fetch_nse_api_index_history(index_name, date.today() - timedelta(days=365 * years + 10), date.today())
-        except (requests.RequestException, ValueError, json.JSONDecodeError):
-            api_series = pd.Series(dtype="float64")
-        if api_series.dropna().size >= 60:
-            frame = frame.drop(columns=[exposure_id], errors="ignore").join(api_series.rename(exposure_id), how="outer")
         else:
             missing[exposure_id] = index_name
     if missing:
-        archive = fetch_nse_archive_indices(missing.values(), start=date.today() - timedelta(days=365 * years + 10), end=date.today())
-        for exposure_id, index_name in missing.items():
-            if index_name in archive.columns and archive[index_name].dropna().size >= 60:
-                frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[index_name].rename(exposure_id), how="outer")
+        api_frame, unresolved = fetch_nse_api_indices(missing, start=date.today() - timedelta(days=365 * years + 10), end=date.today())
+        if not api_frame.empty:
+            frame = frame.join(api_frame, how="outer")
+        if unresolved:
+            archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=365 * years + 10), end=date.today())
+            for exposure_id, index_name in unresolved.items():
+                if index_name in archive.columns and archive[index_name].dropna().size >= 60:
+                    frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[index_name].rename(exposure_id), how="outer")
     return frame.sort_index()
