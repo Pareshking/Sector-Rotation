@@ -11,10 +11,19 @@ class _Response:
         return None
 
     def json(self) -> dict[str, str]:
-        return {"d": json.dumps([
-            {"indexName": "Nifty Financial Services", "HistoricalDate": "28 Aug 2026", "OPEN": "25000", "HIGH": "25100", "LOW": "24900", "CLOSE": "25050"},
-            {"indexName": "Nifty Financial Services", "HistoricalDate": "27 Aug 2026", "OPEN": "24900", "HIGH": "25050", "LOW": "24850", "CLOSE": "24950"},
-        ])}
+        dates = pd.bdate_range("2026-05-18", periods=80)
+        rows = [
+            {
+                "indexName": "Nifty Financial Services",
+                "HistoricalDate": day.strftime("%d %b %Y"),
+                "OPEN": f"{25000 + i * 2:.2f}",
+                "HIGH": f"{25020 + i * 2:.2f}",
+                "LOW": f"{24980 + i * 2:.2f}",
+                "CLOSE": f"{25010 + i * 2:.2f}",
+            }
+            for i, day in enumerate(dates)
+        ]
+        return {"d": json.dumps(rows)}
 
 
 class _Session:
@@ -27,10 +36,11 @@ class _Session:
 
 def test_nifty_indices_parser(monkeypatch) -> None:
     monkeypatch.setattr("src.data.nifty_indices.cloudscraper.create_scraper", lambda **kwargs: _Session())
-    series = fetch_nifty_index_history("Nifty Financial Services", start=date(2026, 8, 27), end=date(2026, 8, 28))
+    series = fetch_nifty_index_history("Nifty Financial Services", start=date(2026, 5, 18), end=date(2026, 9, 4))
     assert isinstance(series, pd.Series)
-    assert len(series) == 2
-    assert float(series.iloc[-1]) == 25050.0
+    assert len(series) == 80
+    assert len(series.dropna()) >= 60
+    assert float(series.iloc[-1]) == 25168.0
 
 
 def test_official_index_aliases() -> None:
