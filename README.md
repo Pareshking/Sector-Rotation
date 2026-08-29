@@ -4,7 +4,7 @@ Exposure-first quantitative sector and thematic rotation research for Indian equ
 
 ## Scope
 
-The universe covers major NSE/Nifty sectoral and thematic exposures. NSE Indices currently maintains separate sectoral and thematic index families; the registry is intentionally exposure-first so multiple ETFs tracking one benchmark do not become duplicate sector observations. citeturn0search0turn0search1
+The universe covers major NSE/Nifty sectoral and thematic exposures. The registry is intentionally exposure-first so multiple ETFs tracking one benchmark do not become duplicate sector observations.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ Universe Registry -> Exposure -> canonical benchmark
         v
 Quantitative engine
   - 1M / 3M / 6M / 12M relative returns
-  - Mansfield Relative Strength
+  - weekly Mansfield Relative Strength
   - cross-sectional Z-scores
   - percentile ranks
   - RS ratio + RS momentum stage
@@ -53,8 +53,9 @@ The Streamlit application never performs bulk historical downloads. It reads pre
 Generated datasets:
 
 - `summary_rankings.parquet` — latest exposure ranking and metrics
-- `rs_matrix.parquet` — historical Mansfield RS matrix
+- `rs_matrix.parquet` — historical weekly Mansfield RS matrix
 - `etf_universe.parquet` — ETF implementation metadata
+- `etf_prices.parquet` — historical adjusted ETF prices
 - `metadata.json` — pipeline provenance
 
 ## Quantitative definitions
@@ -71,15 +72,15 @@ Relative momentum against Nifty 50 is:
 
 ### Mansfield Relative Strength
 
-First calculate the price-relative series:
+First calculate the price-relative series and resample to Friday observations:
 
 `RS_t = P_exposure,t / P_benchmark,t`
 
-Then use the rolling mean baseline:
+Then use the 52-week rolling mean baseline:
 
 `MRS_t = 100 * (RS_t / SMA(RS_t, 52) - 1)`
 
-The 52-period default is a weekly-style Mansfield window. The implementation uses the available daily series; this is explicitly documented because daily-vs-weekly convention changes the numerical output.
+RS momentum is the 13-week change in MRS.
 
 ### Stage
 
@@ -136,13 +137,15 @@ streamlit run app/streamlit_app.py
 python -m pipeline.run_pipeline --mode live
 ```
 
-The live run requests approximately five years of adjusted historical prices for the benchmark and those canonical exposures that have a configured Yahoo Finance symbol. Newer or unsupported Nifty indices remain present in the registry but are not silently fabricated.
+The live run requests approximately five years of adjusted historical prices for the benchmark, configured canonical exposures, and configured ETF implementations. Newer or unsupported Nifty indices remain present in the registry but are not silently fabricated.
 
 ## GitHub Actions
 
-`.github/workflows/data_pipeline.yml` provides manual and weekday scheduled execution. The workflow installs the pinned dependency ranges, runs the live pipeline, and commits changed prepared datasets.
+`.github/workflows/data_pipeline.yml` provides manual and weekday scheduled execution. The workflow installs the constrained dependency ranges, runs the live pipeline, and commits changed prepared datasets. A path filter prevents generated-data commits from recursively launching the pipeline.
 
-For a public Streamlit Community Cloud deployment, point the app entrypoint at `app/streamlit_app.py`. The app is intentionally lightweight and does not require secrets for the fixture dataset.
+## Streamlit Community Cloud
+
+The repository is structured for Streamlit Community Cloud. Use `app/streamlit_app.py` as the entrypoint and the root `requirements.txt` for dependencies. The app does not require secrets for the prepared public dataset.
 
 ## Data limitations
 
