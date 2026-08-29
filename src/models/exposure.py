@@ -21,8 +21,9 @@ class TrackingMetrics(BaseModel):
 
 class ETFMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    symbol: str = Field(min_length=1)
+    symbol: Optional[str] = Field(default=None, min_length=1)
     name: str = Field(min_length=1)
+    scheme_code: Optional[int] = Field(default=None, gt=0)
     yfinance_symbol: Optional[str] = None
     exchange: str = "NSE"
     aliases: list[str] = Field(default_factory=list)
@@ -30,8 +31,8 @@ class ETFMapping(BaseModel):
 
     @field_validator("symbol", "exchange")
     @classmethod
-    def normalize_text(cls, value: str) -> str:
-        return value.strip().upper()
+    def normalize_text(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip().upper() if value is not None else None
 
     @field_validator("aliases")
     @classmethod
