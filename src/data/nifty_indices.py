@@ -20,32 +20,13 @@ ARCHIVE_FALLBACK_DAYS = 400
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json,text/plain,*/*", "Referer": "https://www.nseindia.com/", "Accept-Language": "en-US,en;q=0.9"}
 
-# The universe uses stable exposure identifiers while NSE/NiftyIndices expects
-# the exact published indexType/name. Keep aliases here so historical-source
-# naming changes do not leak into the domain model or pipeline.
 INDEX_NAME_ALIASES: dict[str, str] = {
-    "telecom": "NIFTY TELECOMMUNICATIONS",
-    "nifty telecom": "NIFTY TELECOMMUNICATIONS",
-    "telecommunications": "NIFTY TELECOMMUNICATIONS",
-    "nifty telecommunications": "NIFTY TELECOMMUNICATIONS",
-    "nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
-    "nifty nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
-    "nifty financial services ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
-    "financial-services-ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
-    "healthcare": "NIFTY HEALTHCARE",
-    "nifty healthcare": "NIFTY HEALTHCARE",
-    "healthcare index": "NIFTY HEALTHCARE INDEX",
-    "nifty healthcare index": "NIFTY HEALTHCARE INDEX",
-    "power": "NIFTY POWER",
-    "nifty power": "NIFTY POWER",
-    "capital-goods": "NIFTY CAPITAL GOODS",
-    "capital goods": "NIFTY CAPITAL GOODS",
-    "nifty capital goods": "NIFTY CAPITAL GOODS",
-    "consumer-services": "NIFTY CONSUMER SERVICES",
-    "consumer services": "NIFTY CONSUMER SERVICES",
-    "nifty consumer services": "NIFTY CONSUMER SERVICES",
-    "financial-services": "NIFTY FINANCIAL SERVICES",
-    "financial services": "NIFTY FINANCIAL SERVICES",
+    "telecom": "NIFTY TELECOMMUNICATIONS", "nifty telecom": "NIFTY TELECOMMUNICATIONS", "telecommunications": "NIFTY TELECOMMUNICATIONS", "nifty telecommunications": "NIFTY TELECOMMUNICATIONS",
+    "nbfc": "NIFTY FINANCIAL SERVICES EX-BANK", "nifty nbfc": "NIFTY FINANCIAL SERVICES EX-BANK", "nifty financial services ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK", "financial-services-ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
+    "healthcare": "NIFTY HEALTHCARE", "nifty healthcare": "NIFTY HEALTHCARE", "healthcare index": "NIFTY HEALTHCARE INDEX", "nifty healthcare index": "NIFTY HEALTHCARE INDEX",
+    "power": "NIFTY POWER", "nifty power": "NIFTY POWER", "capital-goods": "NIFTY CAPITAL GOODS", "capital goods": "NIFTY CAPITAL GOODS", "nifty capital goods": "NIFTY CAPITAL GOODS",
+    "consumer-services": "NIFTY CONSUMER SERVICES", "consumer services": "NIFTY CONSUMER SERVICES", "nifty consumer services": "NIFTY CONSUMER SERVICES",
+    "financial-services": "NIFTY FINANCIAL SERVICES", "financial services": "NIFTY FINANCIAL SERVICES",
 }
 
 
@@ -54,7 +35,6 @@ def _canonical_name(name: str) -> str:
 
 
 def resolve_index_names(name: str) -> list[str]:
-    """Return official query candidates, preserving the requested name last."""
     normalized = " ".join(str(name).strip().lower().split())
     resolved = INDEX_NAME_ALIASES.get(normalized)
     candidates: list[str] = []
@@ -68,7 +48,7 @@ def resolve_index_names(name: str) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-def _request(name: str, start: date, end: date, timeout: int = 45) -> list[dict[str, object]]:
+def _request(name: str, start: date, end: date, timeout: int = 15) -> list[dict[str, object]]:
     payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (name, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), name)}
     session = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux", "mobile": False})
     try:
@@ -206,17 +186,17 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
     mapping = dict(names)
     frame = existing.copy() if existing is not None else pd.DataFrame()
     missing: dict[str, str] = {}
-    nifty_available = True
+    # Each exposure is independent: one NiftyIndices failure must never disable
+    # authoritative retrieval for the remaining universe.
     for exposure_id, index_name in mapping.items():
         series = frame[exposure_id] if exposure_id in frame.columns else pd.Series(dtype="float64")
         if series.dropna().size >= 60:
             continue
         fetched = pd.Series(dtype="float64")
-        if nifty_available:
-            try:
-                fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
-            except RuntimeError:
-                nifty_available = False
+        try:
+            fetched = fetch_nifty_index_history(index_name, years=years, retries=1)
+        except RuntimeError:
+            pass
         if fetched.dropna().size >= 60:
             frame = frame.drop(columns=[exposure_id], errors="ignore").join(fetched.rename(exposure_id), how="outer")
         else:
