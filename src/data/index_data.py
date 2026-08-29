@@ -29,15 +29,13 @@ def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
 
 
 def download_canonical_indices(exposure_names: Mapping[str, str], yfinance_symbols: Mapping[str, str | None], years: int = 5, etf_histories: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Resolve canonical benchmarks through the canonical resolver only.
-
-    The resolver owns the verified Yahoo index allow-list. The universe's
-    optional yfinance_symbol fields are not treated as proof that an index
-    ticker exists, preventing accidental Yahoo requests for thematic/niche
-    index names that do not have a real Yahoo symbol.
-    """
+    """Resolve canonical benchmarks through the canonical resolver only."""
     del yfinance_symbols
-    prices = fetch_missing_indices(exposure_names, years=years, etf_histories=etf_histories)
+    anchor = download_history(["^NSEI"], years=years)
+    if not anchor.empty:
+        anchor = anchor.rename(columns={"^NSEI": "nifty50"})
+    prices = fetch_missing_indices(exposure_names, existing=anchor, years=years, etf_histories=etf_histories)
+    prices = prices.drop(columns=["nifty50"], errors="ignore")
     resolved = dict(prices.attrs.get("resolved_name_by_exposure", {}))
     sources = dict(prices.attrs.get("source_by_exposure", {}))
     prices.attrs["source_by_exposure"] = sources
