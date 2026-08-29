@@ -73,12 +73,21 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
 def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = 15) -> pd.Series:
     session = requests.Session()
     session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
-    response = session.get(NSE_API_URL, params={"indexType": name, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
-    response.raise_for_status()
-    payload = response.json()
-    data = payload.get("data", {}) if isinstance(payload, dict) else {}
-    rows = data.get("indexCloseOnlineRecords", []) if isinstance(data, dict) else []
-    return _rows_to_series(name, rows) if isinstance(rows, list) else pd.Series(dtype="float64", name=name)
+    candidates = [name, _canonical_name(name)]
+    seen: set[str] = set()
+    for index_type in candidates:
+        if index_type in seen:
+            continue
+        seen.add(index_type)
+        response = session.get(NSE_API_URL, params={"indexType": index_type, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        rows = data.get("indexCloseOnlineRecords", []) if isinstance(data, dict) else []
+        series = _rows_to_series(name, rows) if isinstance(rows, list) else pd.Series(dtype="float64", name=name)
+        if series.dropna().size >= 60:
+            return series
+    return pd.Series(dtype="float64", name=name)
 
 
 def _api_fetch_one(exposure_id: str, index_name: str, start: date, end: date) -> tuple[str, str, pd.Series]:
