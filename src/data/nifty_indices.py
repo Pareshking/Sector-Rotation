@@ -20,14 +20,56 @@ ARCHIVE_FALLBACK_DAYS = 400
 HEADERS = {"Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/json; charset=UTF-8", "Origin": BASE_URL, "Referer": HISTORICAL_PAGE, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 Sector-Rotation/1.0", "X-Requested-With": "XMLHttpRequest"}
 NSE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/json,text/plain,*/*", "Referer": "https://www.nseindia.com/", "Accept-Language": "en-US,en;q=0.9"}
 
+# The universe uses stable exposure identifiers while NSE/NiftyIndices expects
+# the exact published indexType/name. Keep aliases here so historical-source
+# naming changes do not leak into the domain model or pipeline.
+INDEX_NAME_ALIASES: dict[str, str] = {
+    "telecom": "NIFTY TELECOMMUNICATIONS",
+    "nifty telecom": "NIFTY TELECOMMUNICATIONS",
+    "telecommunications": "NIFTY TELECOMMUNICATIONS",
+    "nifty telecommunications": "NIFTY TELECOMMUNICATIONS",
+    "nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
+    "nifty nbfc": "NIFTY FINANCIAL SERVICES EX-BANK",
+    "nifty financial services ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
+    "financial-services-ex-bank": "NIFTY FINANCIAL SERVICES EX-BANK",
+    "healthcare": "NIFTY HEALTHCARE",
+    "nifty healthcare": "NIFTY HEALTHCARE",
+    "healthcare index": "NIFTY HEALTHCARE INDEX",
+    "nifty healthcare index": "NIFTY HEALTHCARE INDEX",
+    "power": "NIFTY POWER",
+    "nifty power": "NIFTY POWER",
+    "capital-goods": "NIFTY CAPITAL GOODS",
+    "capital goods": "NIFTY CAPITAL GOODS",
+    "nifty capital goods": "NIFTY CAPITAL GOODS",
+    "consumer-services": "NIFTY CONSUMER SERVICES",
+    "consumer services": "NIFTY CONSUMER SERVICES",
+    "nifty consumer services": "NIFTY CONSUMER SERVICES",
+    "financial-services": "NIFTY FINANCIAL SERVICES",
+    "financial services": "NIFTY FINANCIAL SERVICES",
+}
+
 
 def _canonical_name(name: str) -> str:
     return " ".join(str(name).strip().upper().split())
 
 
+def resolve_index_names(name: str) -> list[str]:
+    """Return official query candidates, preserving the requested name last."""
+    normalized = " ".join(str(name).strip().lower().split())
+    resolved = INDEX_NAME_ALIASES.get(normalized)
+    candidates: list[str] = []
+    if resolved:
+        candidates.append(resolved)
+        if normalized in {"healthcare", "nifty healthcare"}:
+            candidates.append("NIFTY HEALTHCARE INDEX")
+        if normalized in {"healthcare index", "nifty healthcare index"}:
+            candidates.append("NIFTY HEALTHCARE")
+    candidates.append(_canonical_name(name))
+    return list(dict.fromkeys(candidates))
+
+
 def _request(name: str, start: date, end: date, timeout: int = 45) -> list[dict[str, object]]:
-    canonical = _canonical_name(name)
-    payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (canonical, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), canonical)}
+    payload = {"cinfo": "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (name, start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"), name)}
     session = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux", "mobile": False})
     try:
         session.get(HISTORICAL_PAGE, headers={"User-Agent": HEADERS["User-Agent"]}, timeout=8)
@@ -62,7 +104,12 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            return _rows_to_series(name, _request(name, start_date, end_date))
+            for candidate in resolve_index_names(name):
+                rows = _request(candidate, start_date, end_date)
+                series = _rows_to_series(name, rows)
+                if series.dropna().size >= 60:
+                    return series
+            raise ValueError(f"No usable historical rows for index {name!r}")
         except (requests.RequestException, ValueError, json.JSONDecodeError) as exc:
             last_error = exc
             if attempt < retries:
@@ -73,12 +120,7 @@ def fetch_nifty_index_history(name: str, years: int = 5, start: date | None = No
 def fetch_nse_api_index_history(name: str, start: date, end: date, timeout: int = 15) -> pd.Series:
     session = requests.Session()
     session.get("https://www.nseindia.com/", headers=NSE_HEADERS, timeout=8)
-    candidates = [name, _canonical_name(name)]
-    seen: set[str] = set()
-    for index_type in candidates:
-        if index_type in seen:
-            continue
-        seen.add(index_type)
+    for index_type in resolve_index_names(name):
         response = session.get(NSE_API_URL, params={"indexType": index_type, "from": start.strftime("%d-%m-%Y"), "to": end.strftime("%d-%m-%Y")}, headers=NSE_HEADERS, timeout=timeout)
         response.raise_for_status()
         payload = response.json()
@@ -186,6 +228,8 @@ def fetch_missing_indices(names: Mapping[str, str] | Iterable[tuple[str, str]], 
         if unresolved:
             archive = fetch_nse_archive_indices(unresolved.values(), start=date.today() - timedelta(days=ARCHIVE_FALLBACK_DAYS), end=date.today())
             for exposure_id, index_name in unresolved.items():
-                if index_name in archive.columns and archive[index_name].dropna().size >= 60:
-                    frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[index_name].rename(exposure_id), how="outer")
+                candidates = resolve_index_names(index_name)
+                matched = next((candidate for candidate in candidates if candidate in archive.columns), None)
+                if matched is not None and archive[matched].dropna().size >= 60:
+                    frame = frame.drop(columns=[exposure_id], errors="ignore").join(archive[matched].rename(exposure_id), how="outer")
     return frame.sort_index()
