@@ -1,6 +1,10 @@
 name: Data Pipeline
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "data/processed/**"
   workflow_dispatch:
   schedule:
     - cron: "30 12 * * 1-5"
@@ -11,7 +15,7 @@ permissions:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
