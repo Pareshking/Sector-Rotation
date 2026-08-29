@@ -25,12 +25,18 @@ class ETFMapping(BaseModel):
     name: str = Field(min_length=1)
     yfinance_symbol: Optional[str] = None
     exchange: str = "NSE"
+    aliases: list[str] = Field(default_factory=list)
     tracking: TrackingMetrics = Field(default_factory=TrackingMetrics)
 
     @field_validator("symbol", "exchange")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return value.strip().upper()
+
+    @field_validator("aliases")
+    @classmethod
+    def normalize_aliases(cls, value: list[str]) -> list[str]:
+        return sorted({item.strip().upper() for item in value if item.strip()})
 
 
 class Exposure(BaseModel):
