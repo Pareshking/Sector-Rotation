@@ -17,21 +17,18 @@ def _finish(fig: go.Figure,height:int=420)->go.Figure:
 def ranking_bar(summary: pd.DataFrame,limit:int=12)->go.Figure:
     frame=summary.sort_values("rank").head(limit).copy().sort_values("momentum_z")
     fig=px.bar(frame,x="momentum_z",y="exposure",color="stage",orientation="h",hover_data=[c for c in ["rank","return_1M","return_3M","return_6M","return_12M","model_action"] if c in frame],color_discrete_map=COLORS)
-    fig.update_layout(xaxis_title="Momentum Z-score",yaxis_title="",legend_title_text="Stage",legend=dict(orientation="h",y=1.04,x=0,yanchor="bottom"),bargap=.28); fig.add_vline(x=0,line_color="#cbd5e1",line_width=1)
+    fig.update_layout(xaxis_title="Composite Momentum Z-score",yaxis_title="",legend_title_text="Stage",legend=dict(orientation="h",y=1.04,x=0,yanchor="bottom"),bargap=.28); fig.add_vline(x=0,line_color="#cbd5e1",line_width=1)
     return _finish(fig,max(300,30*len(frame)))
 
 
 def rs_heatmap(summary: pd.DataFrame,limit:int=18)->go.Figure:
-    cols=[c for c in ["return_1M","return_3M","return_6M","return_12M","momentum_z"] if c in summary]
+    cols=[c for c in ["return_1M","return_3M","return_6M","return_12M"] if c in summary]
     frame=summary.sort_values("momentum_z",ascending=False).head(limit).copy()
     matrix=frame.set_index("exposure")[cols].replace([math.inf,-math.inf],pd.NA).dropna(how="all")
     if matrix.empty: return _finish(go.Figure(),320)
-    text=matrix.copy().astype(object)
-    for col in text.columns:
-        if col.startswith("return_"): text[col]=matrix[col].map(lambda x:"—" if pd.isna(x) else f"{x*100:.1f}%")
-        else: text[col]=matrix[col].map(lambda x:"—" if pd.isna(x) else f"{x:.2f}")
-    fig=go.Figure(go.Heatmap(z=matrix.to_numpy(dtype=float),x=list(matrix.columns),y=list(matrix.index),text=text.to_numpy(),texttemplate="%{text}",colorscale="RdYlGn",zmid=0,colorbar=dict(title="Return / Z")))
-    fig.update_layout(xaxis_title="Horizon / score",yaxis_title="",margin=dict(l=8,r=8,t=10,b=50)); fig.update_xaxes(tickangle=-35,tickfont=dict(size=10)); fig.update_yaxes(tickfont=dict(size=10))
+    text=matrix.map(lambda x:"—" if pd.isna(x) else f"{x*100:.1f}%")
+    fig=go.Figure(go.Heatmap(z=matrix.to_numpy(dtype=float),x=[c.replace("return_","").upper() for c in matrix.columns],y=list(matrix.index),text=text.to_numpy(),texttemplate="%{text}",colorscale="RdYlGn",zmid=0,colorbar=dict(title="Return")))
+    fig.update_layout(xaxis_title="Price return",yaxis_title="",margin=dict(l=8,r=8,t=10,b=35)); fig.update_xaxes(tickfont=dict(size=10)); fig.update_yaxes(tickfont=dict(size=10))
     return _finish(fig,max(330,27*len(matrix)))
 
 
@@ -43,8 +40,7 @@ def rrg_quadrant(summary: pd.DataFrame,label_limit:int=5)->go.Figure:
     labels=frame.head(label_limit)
     if not labels.empty: fig.add_trace(go.Scatter(x=labels["rs_ratio"],y=labels["rs_momentum"],mode="text",text=labels["exposure"],textposition="top center",textfont=dict(size=9,color="#334155"),hoverinfo="skip",showlegend=False))
     fig.add_vline(x=1.0,line_dash="dash",line_color="#cbd5e1"); fig.add_hline(y=0.0,line_dash="dash",line_color="#cbd5e1")
-    fig.add_annotation(x=.98,y=1,text="IMPROVING",showarrow=False,xref="x",yref="paper",font=dict(size=9,color="#94a3b8")); fig.add_annotation(x=1.02,y=1,text="LEADING",showarrow=False,xref="x",yref="paper",font=dict(size=9,color="#94a3b8"))
-    fig.update_traces(marker=dict(size=9,line=dict(width=1,color="white"))); fig.update_layout(xaxis_title="RS Ratio · 1.00 = benchmark",yaxis_title="RS Momentum · 0 = neutral",legend=dict(orientation="h",y=1.04,x=0,yanchor="bottom")); return _finish(fig,400)
+    fig.update_layout(xaxis_title="RS Ratio · 1.00 = benchmark",yaxis_title="RS Momentum · 13W change in MRS",legend=dict(orientation="h",y=1.04,x=0,yanchor="bottom")); return _finish(fig,400)
 
 
 def rs_trajectory(rs:pd.DataFrame,exposure:str,window:int=52)->go.Figure:
