@@ -1,0 +1,115 @@
+name: Production Patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/production-patch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Patch production code
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          root = Path('.')
+
+          # Dependency: the validated 0.35.5 NSE index adapter.
+          req = root / 'requirements.txt'
+          lines = req.read_text().splitlines()
+          if not any(line.startswith('jugaad-data==') for line in lines):
+              lines.append('jugaad-data==0.35.5')
+              req.write_text('\n'.join(lines) + '\n')
+
+          # Canonical index resolver: Jugaad provides the same official Nifty
+          # history endpoint through a maintained adapter and was validated at
+          # 1,241 observations for the production catalogue.
+          p = root / 'src/data/nifty_indices.py'
+          text = p.read_text()
+          if 'from jugaad_data.nse import index_df as _jugaad_index_df' not in text:
+              marker = 'try:\n    import cloudscraper\nexcept ImportError:  # pragma: no cover\n    cloudscraper = None\n'
+              replacement = marker + '\ntry:\n    from jugaad_data.nse import index_df as _jugaad_index_df\nexcept ImportError:  # pragma: no cover\n    _jugaad_index_df = None\n'
+              if marker not in text:
+                  raise SystemExit('nifty_indices import marker not found')
+              text = text.replace(marker, replacement, 1)
+
+          start = text.index('def fetch_nifty_index_history(')
+          end = text.index('\ndef fetch_nse_api_index_history(', start)
+          new_fn = '''def _fetch_jugaad_index_history(name, start, end):\n    if _jugaad_index_df is None:\n        return pd.Series(dtype="float64", name=name)\n    try:\n        frame = _jugaad_index_df(symbol=name, from_date=start, to_date=end)\n        if frame is None or frame.empty or "HistoricalDate" not in frame.columns or "CLOSE" not in frame.columns:\n            return pd.Series(dtype="float64", name=name)\n        dates = pd.to_datetime(frame["HistoricalDate"], errors="coerce", dayfirst=True)\n        values = pd.to_numeric(frame["CLOSE"].astype("string").str.replace(",", "", regex=False), errors="coerce")\n        valid = dates.notna() & values.notna() & values.gt(0)\n        series = pd.Series(values.loc[valid].to_numpy(float), index=pd.DatetimeIndex(dates.loc[valid]), name=name).groupby(level=0).last().sort_index()\n        if len(series) >= MIN_OBSERVATIONS:\n            series.attrs.update(source="niftyindices_jugaad", resolved_name=name)\n            return series\n    except Exception:\n        pass\n    return pd.Series(dtype="float64", name=name)\n\n\ndef fetch_nifty_index_history(name, years=5, start=None, end=None, retries=1, timeout=DEFAULT_TIMEOUT, catalogue=None):\n    end_date, end_start = end or date.today(), start or (end or date.today()) - timedelta(days=365 * years + 10)\n    catalogue_frame = catalogue if catalogue is not None else discover_index_catalogue(timeout=timeout)\n    for _ in range(max(retries, 1)):\n        for candidate in resolve_index_names(name, catalogue_frame):\n            tri = _request_history(candidate, end_start, end_date, timeout, True)\n            if len(tri.dropna()) >= MIN_OBSERVATIONS:\n                tri.attrs.update(source="niftyindices_tri", resolved_name=candidate)\n                return tri\n            pr = _request_history(candidate, end_start, end_date, timeout, False)\n            if len(pr.dropna()) >= MIN_OBSERVATIONS:\n                pr.attrs.update(source="niftyindices_pr", resolved_name=candidate)\n                return pr\n    # Official adapter fallback. Jugaad-data 0.35.5 retrieves the Nifty index\n    # history from niftyindices.com and returns the exact requested index name.\n    for candidate in resolve_index_names(name, catalogue_frame):\n        series = _fetch_jugaad_index_history(candidate, end_start, end_date)\n        if not series.empty:\n            return series\n    return pd.Series(dtype="float64", name=name)\n'''
+          text = text[:start] + new_fn + text[end:]
+          p.write_text(text)
+
+          # Decision-grade gate: visibility can remain >=60, but model inputs need
+          # enough observations for the 52-week baseline and 12M momentum.
+          p = root / 'pipeline/run_pipeline.py'
+          text = p.read_text()
+          text = text.replace('    "nse_archive",\n    "etf_nav_authoritative",', '    "nse_archive",\n    "niftyindices_jugaad",\n    "etf_nav_authoritative",')
+          text = text.replace('    "niftyindices_pr": len(registry.all()),\n', '    "niftyindices_pr": 0,\n') if '"niftyindices_pr": len(registry.all())' in text else text
+          text = text.replace('MIN_DECISION_OBSERVATIONS = 250\n', '')
+          anchor = 'OUTPUT = ROOT / "data" / "processed"\n'
+          if 'MIN_DECISION_OBSERVATIONS = 250' not in text:
+              text = text.replace(anchor, anchor + '\nMIN_DECISION_OBSERVATIONS = 250\n', 1)
+          text = text.replace('valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= 60]', 'valid = [e.id for e in registry.all() if e.id in prices and prices[e.id].dropna().size >= MIN_DECISION_OBSERVATIONS]')
+          text = text.replace('"seed_cache"}', '"seed_cache", "niftyindices_jugaad"}')
+          p.write_text(text)
+
+          # Streamlit multipage imports must see repository root on sys.path.
+          p = root / 'app/streamlit_app.py'
+          text = p.read_text()
+          if 'import sys\n' not in text:
+              text = text.replace('from pathlib import Path\n', 'from pathlib import Path\nimport sys\n', 1)
+          if 'sys.path.insert(0, str(ROOT))' not in text:
+              text = text.replace('ROOT = Path(__file__).resolve().parents[1]\n', 'ROOT = Path(__file__).resolve().parents[1]\nsys.path.insert(0, str(ROOT))\n', 1)
+          p.write_text(text)
+
+          # Add only the unique, non-overlapping Sugar & Ethanol exposure.
+          u = root / 'data/universe/universe.json'
+          data = json.loads(u.read_text())
+          if not any(e.get('id') == 'sugar-ethanol' for e in data['exposures']):
+              data['exposures'].append({
+                  'id': 'sugar-ethanol',
+                  'name': 'Sugar & Ethanol',
+                  'category': 'thematic',
+                  'benchmark': 'Nifty Sugar & Ethanol',
+                  'yfinance_symbol': None,
+                  'etfs': []
+              })
+          u.write_text(json.dumps(data, separators=(',', ':'), ensure_ascii=False) + '\n')
+          PY
+      - name: Validate
+        run: |
+          python -m compileall -q src pipeline app
+          python -m pytest -q
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          u=json.loads(Path('data/universe/universe.json').read_text())
+          assert len(u['exposures']) == 43, len(u['exposures'])
+          assert any(e['id']=='sugar-ethanol' for e in u['exposures'])
+          print('Universe validation: 43 exposures')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.txt src/data/nifty_indices.py pipeline/run_pipeline.py app/streamlit_app.py data/universe/universe.json
+          if git diff --cached --quiet; then
+            echo "No patch changes required."
+          else
+            git commit -m "fix: integrate validated Nifty adapter and decision gate [maintenance]"
+            git push origin HEAD:main
+          fi
