@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from app.components.metrics import data_health_banner, load_metadata
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "processed"
 
@@ -37,6 +39,7 @@ def load_etf_prices() -> pd.DataFrame:
 def main() -> None:
     st.title("India Sector Rotation")
     st.caption("Exposure-first quantitative view of Indian sectors and themes")
+    data_health_banner(load_metadata())
     summary = load_summary()
     if summary.empty:
         st.warning("Prepared data is not available yet. Run `python -m pipeline.run_pipeline --mode fixture` locally or trigger the GitHub data pipeline.")
