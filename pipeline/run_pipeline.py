@@ -30,7 +30,21 @@ def build_fixture(registry: UniverseRegistry, days: int = 1300) -> tuple[pd.Data
         columns[exposure.id] = pd.Series(100 * np.exp(np.cumsum(rng.normal(drift, 0.011, len(dates)))), index=dates)
     etfs = _etf_frame(registry)
     etf_prices = pd.DataFrame({etf.symbol or etf.name: pd.Series(100 * np.exp(np.cumsum(rng.normal(0.0002, 0.01, len(dates)))), index=dates) for exposure in registry.all() for etf in exposure.etfs})
-    health = {"total_canonical_exposures": len(registry.all()), "valid_canonical_series": len(registry.all()), "skipped_canonical_series": 0, "canonical_coverage_ratio": 1.0, "fallback_canonical_exposures": [], "skipped_canonical_exposures": [], "missing_yfinance_symbols": [], "source_counts": {"nse": len(registry.all()), "yahoo": 0, "mfapi": int(etf_prices.shape[1]), "amfi": 0}, "etf_total": int(etf_prices.shape[1]), "etf_valid_series": int(etf_prices.shape[1]), "etf_coverage_ratio": 1.0, "etf_skipped_symbols": []}
+    health = {
+        "total_canonical_exposures": len(registry.all()),
+        "valid_canonical_series": len(registry.all()),
+        "skipped_canonical_series": 0,
+        "canonical_coverage_ratio": 1.0,
+        "fallback_canonical_exposures": [],
+        "skipped_canonical_exposures": [],
+        "missing_yfinance_symbols": [],
+        "source_counts": {"nse": len(registry.all()), "niftyindices_tri": 0, "niftyindices_pr": 0, "yahoo": 0, "mfapi": int(etf_prices.shape[1]), "amfi": 0},
+        "etf_total": int(etf_prices.shape[1]),
+        "etf_valid_series": int(etf_prices.shape[1]),
+        "etf_coverage_ratio": 1.0,
+        "etf_skipped_symbols": [],
+        "resolved_official_index_names": {exposure.id: exposure.benchmark for exposure in registry.all()},
+    }
     return pd.DataFrame(columns), benchmark, etfs, etf_prices, health
 
 
@@ -54,11 +68,38 @@ def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.
     etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
     valid_exposures = [exposure.id for exposure in registry.all() if exposure.id in prices and prices[exposure.id].dropna().size >= 60]
     skipped_exposures = [exposure.id for exposure in registry.all() if exposure.id not in valid_exposures]
-    fallback_exposures = [item for item in valid_exposures if not next(exposure.yfinance_symbol for exposure in registry.all() if exposure.id == item)]
-    source_counts = {"nse": len(fallback_exposures), "yahoo": len(valid_exposures) - len(fallback_exposures), "mfapi": sum(source == "mfapi" for source in etf_sources.values()), "amfi": sum(source == "amfi" for source in etf_sources.values())}
+    source_by_exposure = {str(key): str(value) for key, value in prices.attrs.get("source_by_exposure", {}).items()}
+    resolved_names = {str(key): str(value) for key, value in prices.attrs.get("resolved_name_by_exposure", {}).items()}
+    source_counts: dict[str, int] = {
+        "niftyindices_tri": sum(value == "niftyindices_tri" for value in source_by_exposure.values()),
+        "niftyindices_pr": sum(value == "niftyindices_pr" for value in source_by_exposure.values()),
+        "nse_api": sum(value == "nse_api" for value in source_by_exposure.values()),
+        "nse_archive": sum(value == "nse_archive" for value in source_by_exposure.values()),
+        "yahoo": sum(value == "yahoo" for value in source_by_exposure.values()),
+        "mfapi": sum(source == "mfapi" for source in etf_sources.values()),
+        "amfi": sum(source == "amfi" for source in etf_sources.values()),
+    }
+    source_counts["nse"] = source_counts["niftyindices_tri"] + source_counts["niftyindices_pr"] + source_counts["nse_api"] + source_counts["nse_archive"]
     etf_total = len(etf_objects)
     etf_valid = sum(symbol in etf_history and etf_history[symbol].dropna().size >= 20 for symbol in (etf.symbol for etf in etf_objects if etf.symbol))
-    health = {"total_canonical_exposures": len(registry.all()), "valid_canonical_series": len(valid_exposures), "skipped_canonical_series": len(skipped_exposures), "canonical_coverage_ratio": len(valid_exposures) / max(len(registry.all()), 1), "fallback_canonical_exposures": fallback_exposures, "skipped_canonical_exposures": skipped_exposures, "missing_yfinance_symbols": [exposure.id for exposure in registry.all() if not exposure.yfinance_symbol], "source_counts": source_counts, "etf_total": etf_total, "etf_valid_series": etf_valid, "etf_coverage_ratio": etf_valid / max(etf_total, 1), "etf_skipped_symbols": [etf.symbol for etf in etf_objects if etf.symbol and (etf.symbol not in etf_history or etf_history[etf.symbol].dropna().size < 20)], "etf_source_by_symbol": etf_sources, "resolved_mfapi_scheme_codes": resolved_codes}
+    health = {
+        "total_canonical_exposures": len(registry.all()),
+        "valid_canonical_series": len(valid_exposures),
+        "skipped_canonical_series": len(skipped_exposures),
+        "canonical_coverage_ratio": len(valid_exposures) / max(len(registry.all()), 1),
+        "fallback_canonical_exposures": [exposure_id for exposure_id in valid_exposures if source_by_exposure.get(exposure_id) not in {"niftyindices_tri", "niftyindices_pr"}],
+        "skipped_canonical_exposures": skipped_exposures,
+        "missing_yfinance_symbols": [exposure.id for exposure in registry.all() if not exposure.yfinance_symbol],
+        "source_counts": source_counts,
+        "source_by_canonical_exposure": source_by_exposure,
+        "resolved_official_index_names": resolved_names,
+        "etf_total": etf_total,
+        "etf_valid_series": etf_valid,
+        "etf_coverage_ratio": etf_valid / max(etf_total, 1),
+        "etf_skipped_symbols": [etf.symbol for etf in etf_objects if etf.symbol and (etf.symbol not in etf_history or etf_history[etf.symbol].dropna().size < 20)],
+        "etf_source_by_symbol": etf_sources,
+        "resolved_mfapi_scheme_codes": resolved_codes,
+    }
     return prices, benchmark, _etf_frame(registry), etf_history, health
 
 
@@ -92,8 +133,21 @@ def run(mode: str) -> None:
         latest_ratio = ratio.dropna().iloc[-1] if not ratio.dropna().empty else np.nan
         latest_momentum = momentum.dropna().iloc[-1] if not momentum.dropna().empty else np.nan
         rank_row = rankings.loc[exposure.id]
-        source = "nse" if exposure.id in health.get("fallback_canonical_exposures", []) else "yahoo"
-        summary_rows.append({"exposure_id": exposure.id, "exposure": exposure.name, "category": exposure.category.value, "benchmark": exposure.benchmark, "data_source": source, "rs_ratio": latest_ratio, "rs_momentum": latest_momentum, "stage": rs_stage(latest_ratio, latest_momentum), "momentum_z": rank_row["momentum_z"], "rank": rank_row["rank"], **{f"return_{label}": rank_row[f"return_{label}"] for label in ("1M", "3M", "6M", "12M")}})
+        source = health.get("source_by_canonical_exposure", {}).get(exposure.id, "unknown")
+        summary_rows.append({
+            "exposure_id": exposure.id,
+            "exposure": exposure.name,
+            "category": exposure.category.value,
+            "benchmark": exposure.benchmark,
+            "resolved_official_index_name": health.get("resolved_official_index_names", {}).get(exposure.id, exposure.benchmark),
+            "data_source": source,
+            "rs_ratio": latest_ratio,
+            "rs_momentum": latest_momentum,
+            "stage": rs_stage(latest_ratio, latest_momentum),
+            "momentum_z": rank_row["momentum_z"],
+            "rank": rank_row["rank"],
+            **{f"return_{label}": rank_row[f"return_{label}"] for label in ("1M", "3M", "6M", "12M")},
+        })
     summary = pd.DataFrame(summary_rows).sort_values("rank")
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")

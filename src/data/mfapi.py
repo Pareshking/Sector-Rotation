@@ -22,7 +22,13 @@ class MFAPIResult:
     source: str = "mfapi"
 
 
-def _get_json(url: str, params: dict[str, str] | None, cache_dir: Path, timeout: int, cache_seconds: int) -> Any:
+def _get_json(
+    url: str,
+    params: dict[str, str] | None,
+    cache_dir: Path,
+    timeout: int,
+    cache_seconds: int,
+) -> Any:
     key = cache_key(url, params)
     cached = read_json_cache(cache_dir / f"{key}.json", max_age_seconds=cache_seconds)
     if cached is not None:
@@ -34,7 +40,12 @@ def _get_json(url: str, params: dict[str, str] | None, cache_dir: Path, timeout:
     return payload
 
 
-def search_schemes(query: str, cache_dir: str | Path = DEFAULT_CACHE_DIR, timeout: int = 20, cache_seconds: int = 86400) -> pd.DataFrame:
+def search_schemes(
+    query: str,
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+    timeout: int = 20,
+    cache_seconds: int = 86400,
+) -> pd.DataFrame:
     """Search MFAPI schemes and return normalized scheme-code/name rows."""
     clean = str(query).strip()
     if not clean:
@@ -66,13 +77,21 @@ def _best_candidate(candidates: pd.DataFrame, target: str) -> int | None:
     tokens = [token for token in target_cf.replace("-", " ").split() if len(token) > 2]
     if not tokens:
         return None
-    scored = candidates.assign(_score=candidates["scheme_name"].str.casefold().map(lambda value: sum(token in value for token in tokens)))
+    scored = candidates.assign(
+        _score=candidates["scheme_name"].str.casefold().map(
+            lambda value: sum(token in value for token in tokens)
+        )
+    )
     best = scored.sort_values(["_score", "scheme_code"], ascending=[False, True]).iloc[0]
     threshold = max(1, len(tokens) // 2)
     return int(best["scheme_code"]) if int(best["_score"]) >= threshold else None
 
 
-def resolve_scheme_code(query: str, expected_name: str | None = None, cache_dir: str | Path = DEFAULT_CACHE_DIR) -> int | None:
+def resolve_scheme_code(
+    query: str,
+    expected_name: str | None = None,
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+) -> int | None:
     """Resolve an ETF to a numeric MFAPI scheme code without guessing."""
     candidates = search_schemes(query, cache_dir=cache_dir)
     code = _best_candidate(candidates, expected_name or query)
@@ -83,7 +102,12 @@ def resolve_scheme_code(query: str, expected_name: str | None = None, cache_dir:
     return None
 
 
-def fetch_scheme_history(scheme_code: int, cache_dir: str | Path = DEFAULT_CACHE_DIR, timeout: int = 30, cache_seconds: int = 86400) -> MFAPIResult:
+def fetch_scheme_history(
+    scheme_code: int,
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+    timeout: int = 30,
+    cache_seconds: int = 86400,
+) -> MFAPIResult:
     """Fetch complete historical NAV data for a numeric AMFI scheme code."""
     code = int(scheme_code)
     payload = _get_json(f"{BASE_URL}/{code}", None, Path(cache_dir), timeout, cache_seconds)
@@ -91,14 +115,24 @@ def fetch_scheme_history(scheme_code: int, cache_dir: str | Path = DEFAULT_CACHE
         raise ValueError(f"MFAPI returned an invalid payload for scheme {code}")
     meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
     rows = payload.get("data") if isinstance(payload.get("data"), list) else []
+    raw_dates = pd.Series(
+        [row.get("date") if isinstance(row, dict) else None for row in rows],
+        dtype="string",
+    )
+    parsed_dates = pd.to_datetime(raw_dates, format="%d-%m-%Y", errors="coerce")
     records: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
+    for row, parsed_date in zip(rows, parsed_dates):
+        if not isinstance(row, dict) or pd.isna(parsed_date):
             continue
-        parsed_date = pd.to_datetime(row.get("date"), dayfirst=True, errors="coerce")
         nav = pd.to_numeric(row.get("nav"), errors="coerce")
-        if pd.notna(parsed_date) and pd.notna(nav) and float(nav) > 0:
-            records.append({"date": pd.Timestamp(parsed_date).tz_localize(None), "close": float(nav), "adjusted_close": float(nav)})
+        if pd.notna(nav) and float(nav) > 0:
+            records.append(
+                {
+                    "date": pd.Timestamp(parsed_date),
+                    "close": float(nav),
+                    "adjusted_close": float(nav),
+                }
+            )
     frame = pd.DataFrame(records, columns=["date", "close", "adjusted_close"])
     if not frame.empty:
         frame = frame.drop_duplicates("date").set_index("date").sort_index()
@@ -106,7 +140,12 @@ def fetch_scheme_history(scheme_code: int, cache_dir: str | Path = DEFAULT_CACHE
     return MFAPIResult(frame=frame, scheme_code=code, scheme_name=name)
 
 
-def fetch_etf_nav(query: str, scheme_code: int | None = None, expected_name: str | None = None, cache_dir: str | Path = DEFAULT_CACHE_DIR) -> MFAPIResult:
+def fetch_etf_nav(
+    query: str,
+    scheme_code: int | None = None,
+    expected_name: str | None = None,
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+) -> MFAPIResult:
     code = int(scheme_code) if scheme_code is not None else resolve_scheme_code(query, expected_name=expected_name, cache_dir=cache_dir)
     if code is None:
         raise LookupError(f"MFAPI scheme code could not be resolved for {query!r}")
