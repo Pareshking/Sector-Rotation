@@ -11,6 +11,8 @@ from src.data.index_data import download_history
 from src.data.mfapi import fetch_etf_nav
 from src.models.exposure import ETFMapping
 
+MIN_OBSERVATIONS = 60
+
 
 def download_market_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
     clean = [symbol for symbol in symbols if symbol]
@@ -32,21 +34,29 @@ def _amfi_fallback(etf: ETFMapping, days: int = 90) -> pd.Series:
 
 
 def fetch_etf_histories(etfs: Iterable[ETFMapping], years: int = 5) -> tuple[pd.DataFrame, dict[str, str], dict[str, int]]:
-    """Build ETF history using MFAPI NAV -> Yahoo market close -> AMFI fallback."""
+    """Build ETF history using MFAPI NAV -> Yahoo market close -> AMFI fallback.
+
+    A mapped AMFI scheme is authoritative for the continuous NAV leg. Yahoo is
+    deliberately bypassed when MFAPI supplies at least MIN_OBSERVATIONS rows.
+    Instruments without a scheme code go directly to Yahoo; AMFI remains the
+    emergency final fallback.
+    """
     etf_list = list(etfs)
     columns: dict[str, pd.Series] = {}
     sources: dict[str, str] = {}
     resolved_codes: dict[str, int] = {}
-
-    # Track B primary: MFAPI provides the complete NAV history, independent of
-    # exchange liquidity and zero-volume trading sessions.
     unresolved: list[ETFMapping] = []
+
     for etf in etf_list:
         key = etf.symbol or etf.name
+        if etf.scheme_code is None:
+            unresolved.append(etf)
+            continue
         try:
             result = fetch_etf_nav(key, scheme_code=etf.scheme_code, expected_name=etf.name)
-            if not result.frame.empty and result.frame["adjusted_close"].dropna().size >= 20:
-                columns[key] = result.frame["adjusted_close"].rename(key)
+            series = result.frame["adjusted_close"].dropna() if not result.frame.empty else pd.Series(dtype="float64")
+            if series.size >= MIN_OBSERVATIONS:
+                columns[key] = series.rename(key)
                 sources[key] = "mfapi"
                 resolved_codes[key] = result.scheme_code
                 continue
@@ -54,28 +64,33 @@ def fetch_etf_histories(etfs: Iterable[ETFMapping], years: int = 5) -> tuple[pd.
             pass
         unresolved.append(etf)
 
-    # Secondary: exchange close, useful for the traded-price/liquidity leg and
-    # for instruments whose MFAPI scheme cannot yet be resolved.
+    # Secondary market-price leg: only instruments without a complete MFAPI
+    # series reach Yahoo. This prevents unnecessary calls for mapped schemes.
     market_symbols = [etf.yfinance_symbol for etf in unresolved if etf.yfinance_symbol]
     market = download_market_history(market_symbols, years=years)
     if not market.empty:
         reverse = {etf.yfinance_symbol: etf.symbol or etf.name for etf in unresolved if etf.yfinance_symbol}
         for yahoo_symbol, etf_key in reverse.items():
-            if yahoo_symbol in market and market[yahoo_symbol].dropna().size >= 20:
-                columns[etf_key] = market[yahoo_symbol].dropna().rename(etf_key)
-                sources[etf_key] = "yahoo"
+            if yahoo_symbol not in market:
+                continue
+            series = market[yahoo_symbol].dropna()
+            if series.size < MIN_OBSERVATIONS:
+                continue
+            columns[etf_key] = series.rename(etf_key)
+            sources[etf_key] = "yahoo"
 
-    # Emergency: official AMFI NAV text/history for any remaining instruments.
+    # Emergency official AMFI history for anything still unresolved. This path
+    # is intentionally last so it cannot cause broad Yahoo/MFAPI duplication.
     for etf in unresolved:
         key = etf.symbol or etf.name
         if key in columns:
             continue
         try:
-            fallback = _amfi_fallback(etf)
+            fallback = _amfi_fallback(etf, days=365 * years + 30)
         except Exception:
             fallback = pd.Series(dtype="float64", name=key)
-        if not fallback.empty:
-            columns[key] = fallback
+        if fallback.size >= MIN_OBSERVATIONS:
+            columns[key] = fallback.rename(key)
             sources[key] = "amfi"
 
     return pd.DataFrame(columns).sort_index(), sources, resolved_codes
