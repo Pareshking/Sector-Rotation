@@ -31,16 +31,22 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
             errors.append(f"{exposure.id}: missing benchmark")
         for etf in exposure.etfs:
             symbol = etf.symbol
-            etf_symbols.append(symbol)
+            if symbol is None and etf.scheme_code is None:
+                errors.append(f"{exposure.id}/{etf.name}: ETF requires symbol or scheme_code")
+                continue
+            if symbol is not None:
+                etf_symbols.append(symbol)
+                if not NSE_SYMBOL_RE.fullmatch(symbol):
+                    errors.append(f"{exposure.id}/{symbol}: invalid NSE symbol format")
+                if symbol in etf.aliases:
+                    errors.append(f"{exposure.id}/{symbol}: primary symbol duplicated in aliases")
             all_aliases.extend(etf.aliases)
-            if not NSE_SYMBOL_RE.fullmatch(symbol):
-                errors.append(f"{exposure.id}/{symbol}: invalid NSE symbol format")
             if etf.yfinance_symbol and not YF_NSE_RE.fullmatch(etf.yfinance_symbol):
-                errors.append(f"{exposure.id}/{symbol}: invalid Yahoo NSE alias {etf.yfinance_symbol}")
+                errors.append(f"{exposure.id}/{symbol or etf.scheme_code}: invalid Yahoo NSE alias {etf.yfinance_symbol}")
             if not etf.yfinance_symbol:
-                warnings.append(f"{exposure.id}/{symbol}: missing yfinance symbol; official/AMFI fallback required")
-            if symbol in etf.aliases:
-                errors.append(f"{exposure.id}/{symbol}: primary symbol duplicated in aliases")
+                warnings.append(f"{exposure.id}/{symbol or etf.scheme_code}: missing yfinance symbol; official/AMFI fallback required")
+            if etf.scheme_code is None:
+                warnings.append(f"{exposure.id}/{symbol or etf.name}: MFAPI scheme code will be resolved by search")
     for symbol, count in Counter(etf_symbols).items():
         if count > 1:
             errors.append(f"Duplicate ETF symbol: {symbol}")
