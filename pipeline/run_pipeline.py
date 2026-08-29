@@ -27,10 +27,7 @@ def build_fixture(registry: UniverseRegistry, days: int = 1300) -> tuple[pd.Data
     for i, exposure in enumerate(registry.all()):
         drift = 0.00015 + (i % 7) * 0.00003
         columns[exposure.id] = pd.Series(100 * np.exp(np.cumsum(rng.normal(drift, 0.011, len(dates)))), index=dates)
-    etf = _etf_frame(registry)
-    for i, row in etf.iterrows():
-        etf.loc[i, "fixture_price"] = 100 * np.exp(np.cumsum(rng.normal(0.0002 + (i % 5) * 0.00004, 0.012, len(dates))))[-1]
-    return pd.DataFrame(columns), benchmark, etf
+    return pd.DataFrame(columns), benchmark, _etf_frame(registry)
 
 
 def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.DataFrame]:
@@ -40,8 +37,7 @@ def build_live(registry: UniverseRegistry) -> tuple[pd.DataFrame, pd.Series, pd.
     benchmark = benchmark_frame.iloc[:, 0]
     symbols = {exposure.id: exposure.yfinance_symbol for exposure in registry.all() if exposure.yfinance_symbol}
     history = download_history(symbols.values(), years=5)
-    reverse = {symbol: exposure_id for exposure_id, symbol in symbols.items()}
-    history = history.rename(columns=reverse)
+    history = history.rename(columns={symbol: exposure_id for exposure_id, symbol in symbols.items()})
     etf_map = {etf.symbol: etf.yfinance_symbol for exposure in registry.all() for etf in exposure.etfs if etf.yfinance_symbol}
     etf_history = download_history(etf_map.values(), years=5)
     etf_history = etf_history.rename(columns={symbol: etf_symbol for etf_symbol, symbol in etf_map.items()})
