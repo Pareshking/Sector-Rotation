@@ -13,7 +13,17 @@ DATA_DIR = ROOT / "data" / "processed"
 st.set_page_config(page_title="India Sector Rotation", page_icon="📊", layout="wide")
 
 
-def _read(name: str) -> pd.DataFrame:
+def _mtime(name: str) -> int:
+    path = DATA_DIR / name
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@st.cache_data(show_spinner=False)
+def _read(name: str, modified_ns: int = 0) -> pd.DataFrame:
+    del modified_ns
     path = DATA_DIR / name
     if not path.exists():
         return pd.DataFrame()
@@ -21,19 +31,19 @@ def _read(name: str) -> pd.DataFrame:
 
 
 def load_summary() -> pd.DataFrame:
-    return _read("summary_rankings.parquet")
+    return _read("summary_rankings.parquet", _mtime("summary_rankings.parquet"))
 
 
 def load_rs() -> pd.DataFrame:
-    return _read("rs_matrix.parquet")
+    return _read("rs_matrix.parquet", _mtime("rs_matrix.parquet"))
 
 
 def load_etfs() -> pd.DataFrame:
-    return _read("etf_universe.parquet")
+    return _read("etf_universe.parquet", _mtime("etf_universe.parquet"))
 
 
 def load_etf_prices() -> pd.DataFrame:
-    return _read("etf_prices.parquet")
+    return _read("etf_prices.parquet", _mtime("etf_prices.parquet"))
 
 
 def main() -> None:

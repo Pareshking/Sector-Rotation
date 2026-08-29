@@ -10,7 +10,16 @@ ROOT = Path(__file__).resolve().parents[2]
 METADATA_PATH = ROOT / "data" / "processed" / "metadata.json"
 
 
-def load_metadata() -> dict[str, object]:
+def _metadata_mtime() -> int:
+    try:
+        return METADATA_PATH.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@st.cache_data(show_spinner=False)
+def load_metadata(modified_ns: int = 0) -> dict[str, object]:
+    del modified_ns
     if not METADATA_PATH.exists():
         return {}
     try:
@@ -19,8 +28,12 @@ def load_metadata() -> dict[str, object]:
         return {}
 
 
+def get_metadata() -> dict[str, object]:
+    return load_metadata(_metadata_mtime())
+
+
 def data_health_banner(metadata: dict[str, object] | None = None) -> None:
-    metadata = metadata or load_metadata()
+    metadata = metadata if metadata is not None else get_metadata()
     if not metadata:
         st.info("Data health: metadata unavailable")
         return
@@ -34,6 +47,14 @@ def data_health_banner(metadata: dict[str, object] | None = None) -> None:
         st.warning(f"Data health: {coverage:.1%} canonical coverage · updated {updated} · fallback {len(fallback)} · skipped {len(skipped)}")
     else:
         st.error(f"Data health: no valid canonical series · updated {updated}")
+
+
+def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
+    metadata = metadata if metadata is not None else get_metadata()
+    source_map = metadata.get("source_by_canonical_exposure", {})
+    name_map = metadata.get("resolved_official_index_names", {})
+    rows = [{"exposure": exposure, "source": source, "resolved_name": name_map.get(exposure, exposure)} for exposure, source in source_map.items()]
+    return pd.DataFrame(rows).sort_values("exposure") if rows else pd.DataFrame(columns=["exposure", "source", "resolved_name"])
 
 
 def metric_row(summary: pd.DataFrame) -> None:

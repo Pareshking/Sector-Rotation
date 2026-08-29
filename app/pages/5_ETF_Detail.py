@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import streamlit as st
+
 from app.streamlit_app import load_etf_prices, load_etfs, load_rs, load_summary
-from app.components.charts import drawdown_chart, rs_trajectory
+from app.components.charts import drawdown_chart, price_chart, rs_trajectory
 
 st.title("ETF Detail")
 etfs = load_etfs()
@@ -26,5 +27,6 @@ if not row.empty:
 
 for symbol in selected["symbol"].tolist():
     if symbol in etf_prices.columns:
-        st.subheader(f"{symbol} — historical drawdown")
+        st.subheader(f"{symbol} — historical NAV / Close")
+        st.plotly_chart(price_chart(etf_prices[symbol], symbol), use_container_width=True)
         st.plotly_chart(drawdown_chart(etf_prices[symbol]), use_container_width=True)

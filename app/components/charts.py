@@ -14,7 +14,7 @@ def ranking_bar(summary: pd.DataFrame) -> go.Figure:
 
 def rs_heatmap(summary: pd.DataFrame) -> go.Figure:
     cols = [c for c in ["return_1M", "return_3M", "return_6M", "return_12M", "momentum_z"] if c in summary]
-    matrix = summary.set_index("exposure")[cols]
+    matrix = summary.set_index("exposure")[cols].replace([float("inf"), float("-inf")], pd.NA).dropna(how="all")
     fig = px.imshow(matrix, text_auto=".2f", aspect="auto", color_continuous_scale="RdYlGn", origin="lower")
     fig.update_layout(height=max(420, 24 * len(matrix)), margin=dict(l=10, r=10, t=20, b=20))
     return fig
@@ -22,7 +22,7 @@ def rs_heatmap(summary: pd.DataFrame) -> go.Figure:
 
 def rrg_quadrant(summary: pd.DataFrame) -> go.Figure:
     frame = summary.dropna(subset=["rs_ratio", "rs_momentum"]).copy()
-    fig = px.scatter(frame, x="rs_ratio", y="rs_momentum", color="stage", text="exposure", hover_data=["rank", "category"])
+    fig = px.scatter(frame, x="rs_ratio", y="rs_momentum", color="stage", text="exposure", hover_data=["rank", "category", "data_source"])
     fig.add_vline(x=1.0, line_dash="dash")
     fig.add_hline(y=0.0, line_dash="dash")
     fig.update_traces(textposition="top center")
@@ -35,6 +35,13 @@ def rs_trajectory(rs: pd.DataFrame, exposure: str, window: int = 52) -> go.Figur
     fig = go.Figure(go.Scatter(x=series.index, y=series.values, mode="lines", name=exposure))
     fig.add_hline(y=0, line_dash="dash")
     fig.update_layout(height=420, xaxis_title="Date", yaxis_title="Mansfield RS (%)", margin=dict(l=10, r=10, t=20, b=20))
+    return fig
+
+
+def price_chart(prices: pd.Series, name: str) -> go.Figure:
+    clean = prices.dropna()
+    fig = go.Figure(go.Scatter(x=clean.index, y=clean.values, mode="lines", name=name))
+    fig.update_layout(height=360, xaxis_title="Date", yaxis_title="NAV / Close", margin=dict(l=10, r=10, t=20, b=20))
     return fig
 
 
