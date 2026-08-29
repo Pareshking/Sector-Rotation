@@ -29,22 +29,17 @@ def download_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
 
 
 def download_canonical_indices(exposure_names: Mapping[str, str], yfinance_symbols: Mapping[str, str | None], years: int = 5, etf_histories: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Resolve canonical benchmarks without inventing Yahoo symbols."""
+    """Resolve canonical benchmarks through the canonical resolver only.
+
+    The resolver owns the verified Yahoo index allow-list. The universe's
+    optional yfinance_symbol fields are not treated as proof that an index
+    ticker exists, preventing accidental Yahoo requests for thematic/niche
+    index names that do not have a real Yahoo symbol.
+    """
+    del yfinance_symbols
     prices = fetch_missing_indices(exposure_names, years=years, etf_histories=etf_histories)
     resolved = dict(prices.attrs.get("resolved_name_by_exposure", {}))
     sources = dict(prices.attrs.get("source_by_exposure", {}))
-    unresolved = {eid: name for eid, name in exposure_names.items() if eid not in prices.columns or prices[eid].dropna().size < MIN_OBSERVATIONS}
-    if unresolved:
-        yahoo_symbols = {eid: yfinance_symbols.get(eid) for eid in unresolved if yfinance_symbols.get(eid)}
-        if yahoo_symbols:
-            market = download_history(yahoo_symbols.values(), years=years)
-            if not market.empty:
-                for eid, symbol in yahoo_symbols.items():
-                    if symbol not in market: continue
-                    series = market[symbol].dropna()
-                    if series.size < MIN_OBSERVATIONS: continue
-                    prices = prices.drop(columns=[eid], errors="ignore").join(series.rename(eid), how="outer")
-                    sources[eid] = "yahoo"; resolved[eid] = exposure_names[eid]
     prices.attrs["source_by_exposure"] = sources
     prices.attrs["resolved_name_by_exposure"] = resolved
     prices.attrs["unresolved_exposures"] = [eid for eid in exposure_names if eid not in prices.columns or prices[eid].dropna().size < MIN_OBSERVATIONS]
