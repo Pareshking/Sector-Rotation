@@ -10,6 +10,8 @@ number is instead of implying total returns everywhere.
 
 from __future__ import annotations
 
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Mapping
@@ -126,14 +128,19 @@ def fetch_jugaad_canonical_indices(
     sources: dict[str, str] = {}
     resolved: dict[str, str] = {}
     value_types: dict[str, str] = {}
+    t0 = time.time()
+    total = len(exposure_names)
+    print(f"[{time.strftime('%H:%M:%S')}] Canonical indices: fetching {total}...", file=sys.stderr, flush=True)
 
     def one(item):
         eid, name = item
         return eid, name, fetch_jugaad_index(name, start, date.today())
 
+    done = 0
     with ThreadPoolExecutor(max_workers=min(workers, max(len(exposure_names), 1))) as pool:
         futures = [pool.submit(one, item) for item in exposure_names.items()]
         for future in as_completed(futures):
+            done += 1
             try:
                 eid, name, series = future.result()
             except Exception:
@@ -143,6 +150,13 @@ def fetch_jugaad_canonical_indices(
                 sources[eid] = series.attrs.get("source", SOURCE)
                 resolved[eid] = series.attrs.get("resolved_name", name)
                 value_types[eid] = series.attrs.get("value_type", VALUE_CLOSE)
+            if done % 10 == 0 or done == total:
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] Canonical indices: {done}/{total} attempted, "
+                    f"{len(results)} resolved, {time.time() - t0:.0f}s elapsed",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     prices = pd.DataFrame(results).sort_index() if results else pd.DataFrame()
     return prices, sources, resolved, value_types

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Iterable
@@ -19,6 +21,16 @@ MIN_OBSERVATIONS = 60
 # HTTP fetches, so more threads is the cheap fix; both hosts tolerate this rate.
 MAX_MFAPI_WORKERS = 12
 NETWORK_TIMEOUT = (5, 10)
+
+
+def _progress(message: str) -> None:
+    """Print immediately, not buffered until the process exits.
+
+    A run that goes silent for a long stretch is indistinguishable from a
+    hung one otherwise — this is what makes a stage actually observable while
+    it's happening, in a CI log tail or a background process alike.
+    """
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
 
 
 def download_market_history(symbols: Iterable[str], years: int = 5) -> pd.DataFrame:
@@ -148,13 +160,19 @@ def fetch_etf_histories(
     columns: dict[str, pd.Series] = {}
     sources: dict[str, str] = {}
     resolved_codes: dict[str, int] = {}
+    _progress(f"ETF fetch starting: {len(etf_list)} vehicles")
 
     # 1. NSE, for anything with a trading symbol.
     listed = {etf.symbol: etf for etf in etf_list if etf.symbol}
     if listed:
+        t0 = time.time()
         for symbol, series in fetch_nse_histories(list(listed), years=years, workers=12).items():
             columns[symbol] = series.rename(symbol)
             sources[symbol] = "nse"
+        _progress(
+            f"NSE: {sum(1 for v in sources.values() if v == 'nse')}/{len(listed)} resolved "
+            f"in {time.time() - t0:.0f}s"
+        )
 
     def _done(etf) -> bool:
         return (etf.symbol or etf.name) in columns
@@ -163,28 +181,38 @@ def fetch_etf_histories(
     mapped = [etf for etf in etf_list if etf.scheme_code is not None and not _done(etf)]
     unresolved: list[ETFMapping] = [etf for etf in etf_list if etf.scheme_code is None and not _done(etf)]
     if mapped:
+        t0 = time.time()
         mfapi_columns, mfapi_codes, mfapi_unresolved = fetch_all_mfapi_histories(mapped)
         columns.update(mfapi_columns)
         resolved_codes.update(mfapi_codes)
         sources.update({key: "mfapi" for key in mfapi_columns})
         unresolved.extend(mfapi_unresolved)
+        _progress(
+            f"MFAPI: {len(mfapi_columns)}/{len(mapped)} resolved, "
+            f"{len(mfapi_unresolved)} falling through, in {time.time() - t0:.0f}s"
+        )
 
     # 3. AMFI official NAV before any third-party mirror. One shared download
     # for the whole remaining batch — see _amfi_fallback_batch for why looping
     # this per vehicle was the actual cause of runs that never finished.
-    try:
-        amfi_columns = _amfi_fallback_batch(list(unresolved), days=365 * years + 30)
-    except Exception:
-        amfi_columns = {}
-    for key, series in amfi_columns.items():
-        columns[key] = series
-        sources[key] = "amfi"
+    if unresolved:
+        t0 = time.time()
+        _progress(f"AMFI: resolving {len(unresolved)} remaining vehicle(s) in one shared download...")
+        try:
+            amfi_columns = _amfi_fallback_batch(list(unresolved), days=365 * years + 30)
+        except Exception:
+            amfi_columns = {}
+        for key, series in amfi_columns.items():
+            columns[key] = series
+            sources[key] = "amfi"
+        _progress(f"AMFI: {len(amfi_columns)}/{len(unresolved)} resolved in {time.time() - t0:.0f}s")
 
     unresolved = [etf for etf in unresolved if (etf.symbol or etf.name) not in columns]
 
     # 4. Yahoo, last. Only instruments no authoritative source could serve.
     market_symbols = [etf.yfinance_symbol for etf in unresolved if etf.yfinance_symbol]
     if market_symbols:
+        t0 = time.time()
         market = download_market_history(market_symbols, years=years)
         if not market.empty:
             reverse = {
@@ -200,5 +228,10 @@ def fetch_etf_histories(
                     continue
                 columns[etf_key] = series.rename(etf_key)
                 sources[etf_key] = "yahoo"
+        _progress(
+            f"Yahoo: {sum(1 for v in sources.values() if v == 'yahoo')}/{len(market_symbols)} "
+            f"resolved in {time.time() - t0:.0f}s"
+        )
 
+    _progress(f"ETF fetch done: {len(columns)}/{len(etf_list)} vehicles resolved")
     return pd.DataFrame(columns).sort_index(), sources, resolved_codes

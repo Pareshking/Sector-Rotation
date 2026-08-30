@@ -156,13 +156,22 @@ def _load_existing_etf_artifacts():
     return history, sources, codes
 
 
+def _stage(message: str) -> None:
+    import sys
+    import time
+
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
+
+
 def build_live(registry, skip_etf: bool = False):
     exposure_names = {e.id: e.benchmark for e in registry.all()}
     etf_objects = [etf for e in registry.all() for etf in e.etfs]
     if skip_etf:
+        _stage("Reusing existing ETF artifacts (--skip-etf)")
         etf_history, etf_sources, resolved_codes = _load_existing_etf_artifacts()
     else:
         etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
+    _stage("Fetching canonical index histories + benchmark...")
     prices = download_canonical_indices(
         exposure_names,
         years=5,
@@ -270,6 +279,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
     if mode == "fixture":
         prices, benchmark, etfs, etf_history, health = build_fixture(registry)
     elif mode == "live":
+        _stage(f"Pipeline starting: {len(registry.all())} exposures, live mode")
         prices, benchmark, etfs, etf_history, health = build_live(registry, skip_etf=skip_etf)
     else:
         raise ValueError("mode must be fixture or live")
@@ -280,6 +290,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
     if prices.empty:
         raise RuntimeError("No overlapping authoritative benchmark/exposure history was downloaded")
 
+    _stage("Ranking and computing durability analytics...")
     rankings = rank_exposures(prices, benchmark, weights=registry.momentum_weights)
     summary_rows = []
     rs_series = {}
@@ -326,6 +337,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
             }
         )
 
+    _stage("Writing outputs and running quality checks...")
     summary = pd.DataFrame(summary_rows).sort_values("rank")
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")
