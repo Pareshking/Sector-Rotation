@@ -73,6 +73,7 @@ def _etf_frame(registry):
                     "category": exposure.category.value,
                     "symbol": etf.symbol,
                     "name": etf.name,
+                    "vehicle": etf.vehicle.value,
                     "scheme_code": etf.scheme_code,
                     "yfinance_symbol": etf.yfinance_symbol,
                     "aliases": ",".join(etf.aliases),

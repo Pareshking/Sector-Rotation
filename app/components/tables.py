@@ -96,8 +96,8 @@ def ranked_table(
         "exposure": st.column_config.TextColumn("Exposure", width="medium", pinned=True),
         "category": st.column_config.TextColumn("Type", width="small"),
         "tradeable": st.column_config.CheckboxColumn(
-            "ETF", width="small",
-            help="A listed ETF tracking this index traded on NSE at the last snapshot",
+            "Buyable", width="small",
+            help="A listed ETF that traded at the last NSE snapshot, or an open-ended index fund",
         ),
         "model_action": st.column_config.TextColumn("Action", width="small"),
         "stage": st.column_config.TextColumn("Stage", width="small"),
@@ -150,7 +150,7 @@ def action_board(columns: Sequence[tuple[str, str, pd.DataFrame, str]], limit: i
             for row in frame.head(limit).to_dict("records"):
                 z = pd.to_numeric(row.get("momentum_z"), errors="coerce")
                 z_text = f"{z:+.2f}" if z == z else "—"
-                flag = "" if row.get("tradeable", True) else '<span class="pill pill-grey">no ETF</span>'
+                flag = "" if row.get("tradeable", True) else '<span class="pill pill-grey">no fund</span>'
                 items.append(
                     '<div class="bitem">'
                     f'<div class="bnm">{_esc(row.get("exposure"))}{flag}</div>'
@@ -184,7 +184,7 @@ def signal_rows(frame: pd.DataFrame, rs: pd.DataFrame | None = None, limit: int 
     rows = []
     for row in view.to_dict("records"):
         rank = pd.to_numeric(row.get("rank"), errors="coerce")
-        flag = "" if row.get("tradeable", True) else ' <span class="pill pill-grey">no ETF</span>'
+        flag = "" if row.get("tradeable", True) else ' <span class="pill pill-grey">no fund</span>'
         shares = row.get("shares_index_with")
         cat = str(row.get("category", "") or "")
         rows.append(

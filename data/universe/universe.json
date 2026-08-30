@@ -152,6 +152,14 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "Kotak Nifty Financial Services Ex-Bank Index Fund",
+          "scheme_code": 151911,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -282,7 +290,16 @@
       "category": "sector",
       "benchmark": "NIFTY MIDSMALL FINANCIAL SERVICES",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Motilal Oswal Nifty MidSmall Financial Services Index Fund",
+          "scheme_code": 153027,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     },
     {
       "id": "oil-gas",
@@ -420,6 +437,14 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "HDFC NIFTY Realty Index Fund",
+          "scheme_code": 152522,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -573,7 +598,16 @@
       "category": "thematic",
       "benchmark": "Nifty India Digital",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "HDFC Nifty India Digital Index Fund",
+          "scheme_code": 153097,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     },
     {
       "id": "internet",
@@ -597,7 +631,32 @@
       "category": "thematic",
       "benchmark": "Nifty India Tourism",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Kotak Nifty India Tourism Index Fund",
+          "scheme_code": 152870,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Motilal Oswal Nifty India Tourism ETF",
+          "scheme_code": 153618,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "etf"
+        },
+        {
+          "name": "Tata Nifty India Tourism Index Fund",
+          "scheme_code": 152742,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     },
     {
       "id": "energy",
@@ -740,7 +799,16 @@
       "category": "thematic",
       "benchmark": "Nifty Services Sector",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Motilal Oswal Nifty Services Sector ETF",
+          "scheme_code": 154033,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "etf"
+        }
+      ]
     },
     {
       "id": "rural",
@@ -780,7 +848,24 @@
       "category": "sector",
       "benchmark": "NIFTY MIDSMALL HEALTHCARE",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Motilal Oswal Nifty MidSmall Healthcare Index Fund",
+          "scheme_code": 153023,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Tata Nifty MidSmall Healthcare Index Fund",
+          "scheme_code": 152564,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     },
     {
       "id": "midsmall-it-telecom",
@@ -788,7 +873,16 @@
       "category": "sector",
       "benchmark": "NIFTY MIDSMALL IT & TELECOM",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Motilal Oswal Nifty MidSmall IT and Telecom Index Fund",
+          "scheme_code": 153029,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     },
     {
       "id": "waves",
@@ -804,7 +898,16 @@
       "category": "thematic",
       "benchmark": "NIFTY REITS & REALTY",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "name": "Edelweiss Nifty REITs & Realty Index Fund",
+          "scheme_code": 154548,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        }
+      ]
     }
   ]
 }

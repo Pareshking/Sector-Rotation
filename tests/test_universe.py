@@ -67,3 +67,25 @@ def test_the_shipped_universe_has_no_shared_benchmarks():
     report = validate_universe(registry.all())
     assert report.valid, report.errors
     del json
+
+
+def test_vehicle_type_defaults_to_etf_and_accepts_index_funds():
+    """An index fund transacts at NAV; an ETF at a price that can differ from it."""
+    from src.models.exposure import ETFMapping, VehicleType
+
+    assert ETFMapping(name="X ETF", symbol="X").vehicle is VehicleType.ETF
+    fund = ETFMapping(name="Y Index Fund", scheme_code=151911, vehicle="index_fund")
+    assert fund.vehicle is VehicleType.INDEX_FUND
+    assert fund.symbol is None
+
+
+def test_index_funds_are_excluded_from_exchange_traded():
+    from src.models.exposure import ETFMapping, Exposure
+
+    exposure = Exposure(
+        id="realty", name="Realty", category="sector", benchmark="Nifty Realty",
+        etfs=[ETFMapping(name="MO Realty ETF", symbol="MOREALTY"),
+              ETFMapping(name="HDFC Realty Index Fund", scheme_code=152522, vehicle="index_fund")],
+    )
+    assert exposure.tradable
+    assert [e.symbol for e in exposure.exchange_traded] == ["MOREALTY"]

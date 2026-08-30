@@ -104,10 +104,16 @@ def _tradeable_ids(modified_ns: int = 0) -> set[str]:
     # instrument can be bought than whether our pipeline happened to ingest its
     # NAV history — MFAPI outages routinely leave a live, liquid ETF with no
     # series on disk.
+    # An open-ended index fund transacts at NAV with no exchange listing, so it
+    # is investable even though NSE reports no turnover for it.
+    is_fund = etfs.get("vehicle", pd.Series("etf", index=etfs.index)).eq("index_fund")
     if "traded_value" in etfs.columns:
         traded = pd.to_numeric(etfs["traded_value"], errors="coerce").fillna(0) > 0
-        if traded.any():
-            return set(etfs.loc[traded, "exposure_id"].dropna().astype(str))
+        investable = traded | is_fund
+        if investable.any():
+            return set(etfs.loc[investable, "exposure_id"].dropna().astype(str))
+    if is_fund.any():
+        return set(etfs.loc[is_fund, "exposure_id"].dropna().astype(str))
     prices = load_etf_prices()
     if prices.empty:
         return set()

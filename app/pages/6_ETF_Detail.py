@@ -119,6 +119,11 @@ else:
         column_config={
             "symbol": st.column_config.TextColumn("Symbol", width="small", pinned=True),
             "name": st.column_config.TextColumn("Fund", width="large"),
+            "vehicle": st.column_config.TextColumn(
+                "Type", width="small",
+                help="etf = bought on exchange at a price that can differ from NAV; "
+                     "index_fund = bought from the AMC at NAV, no spread or premium",
+            ),
             "traded_value": st.column_config.NumberColumn(
                 "Turnover ₹", format="compact", width="small",
                 help="Value traded on NSE at the last pipeline snapshot. Thin turnover means a "
@@ -143,6 +148,12 @@ else:
                 + ". Buying at a premium hands back part of the signal's edge on day one.",
                 tone="amber",
             )
+    if "vehicle" in vehicles.columns and (vehicles["vehicle"] == "index_fund").any():
+        note(
+            "<b>An index fund is often the better vehicle for a monthly rebalance.</b> It "
+            "transacts at NAV with no spread and no premium, so none of the signal's edge is "
+            "lost on entry — at the cost of same-day execution and intraday pricing."
+        )
     st.caption(
         "Turnover, price, NAV and premium are a point-in-time NSE snapshot taken when the pipeline "
         "last ran, not a history. AUM, expense ratio and tracking error are not published on any "

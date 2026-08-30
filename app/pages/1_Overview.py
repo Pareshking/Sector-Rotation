@@ -55,7 +55,7 @@ kpi_strip(
 buyable = int(buy["tradeable"].sum()) if "tradeable" in buy.columns else len(buy)
 if len(buy) and buyable < len(buy):
     note(
-        f"<b>{len(buy) - buyable} of {len(buy)} BUY signals have no listed ETF that trades.</b> "
+        f"<b>{len(buy) - buyable} of {len(buy)} BUY signals have no ETF or index fund.</b> "
         "They are research, not positions. Use the tradeable filter below to see only what you "
         "can actually put money into.",
         tone="amber",

@@ -166,13 +166,20 @@ An exposure with a BUY and no instrument is research, not a position. The dashbo
 signals with no listed ETF carry a `no ETF` badge, and a **Tradeable only** filter on the
 Dashboard and Screener keeps just the ones you can act on.
 
-ETF mappings are built from two authoritative sources and nothing else. NSE's listed-ETF feed
+Two vehicle types are tracked separately, because they are bought differently. An **ETF** trades
+on exchange at a price that can sit above or below NAV. An **open-ended index fund** transacts
+at NAV with no spread and no premium — often the better vehicle for a monthly rebalance, at the
+cost of intraday execution. `vehicle` is `etf` or `index_fund`; an index fund carries an AMFI
+scheme code and no ticker.
+
+Mappings are built from two authoritative sources and nothing else. NSE's listed-ETF feed
 supplies the trading symbol and the index each symbol tracks; AMFI's scheme master supplies the
 fund name and scheme code. A fund is only mapped when, after stripping the AMC name, its index
 tokens match the exposure's benchmark **exactly** — a subset match is how `Groww BSE Power ETF`
 becomes Nifty Power, or `ICICI Nifty Financial Services Ex-Bank ETF` becomes Nifty Services
 Sector. Anything without an authoritative fund name is left unmapped rather than given an
-invented one.
+invented one. Fund-of-funds and IDCW plan variants are excluded; for an index fund the Direct
+Plan Growth option is the one mapped.
 
 Each pipeline run also takes a point-in-time NSE snapshot per symbol: turnover, last price, NAV
 and the resulting premium or discount. AUM, expense ratio and tracking error are not published

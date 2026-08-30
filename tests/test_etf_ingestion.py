@@ -104,3 +104,31 @@ def test_premium_is_computed_from_price_over_nav():
     assert _number("1,234.50") == 1234.5
     assert pd.isna(_number("-"))
     assert pd.isna(_number(None))
+
+
+def test_every_mapped_vehicle_has_a_symbol_or_a_scheme_code():
+    """A vehicle nothing can be fetched by is a dead mapping."""
+    from pathlib import Path
+
+    from src.universe.registry import UniverseRegistry
+
+    root = Path(__file__).resolve().parents[1]
+    registry = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json")
+    for exposure in registry.all():
+        for etf in exposure.etfs:
+            assert etf.symbol or etf.scheme_code, f"{exposure.id}/{etf.name} has neither"
+
+
+def test_index_funds_carry_a_scheme_code_not_a_ticker():
+    from pathlib import Path
+
+    from src.models.exposure import VehicleType
+    from src.universe.registry import UniverseRegistry
+
+    root = Path(__file__).resolve().parents[1]
+    registry = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json")
+    funds = [e for x in registry.all() for e in x.etfs if e.vehicle is VehicleType.INDEX_FUND]
+    assert funds, "expected at least one open-ended index fund in the universe"
+    for fund in funds:
+        assert fund.scheme_code, f"{fund.name} has no AMFI scheme code"
+        assert fund.symbol is None, f"{fund.name} is not exchange-traded but carries a ticker"
