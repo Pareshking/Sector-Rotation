@@ -16,6 +16,7 @@ from typing import Mapping
 
 import pandas as pd
 
+import src.data._jugaad_patches  # noqa: F401 — timeout + wider date-chunking, side effects only
 from jugaad_data.nse import index_raw, index_tri_raw
 
 MIN_OBSERVATIONS = 60

@@ -13,6 +13,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+import src.data._jugaad_patches  # noqa: F401 — timeout + wider date-chunking, side effects only
 from jugaad_data.nse import stock_df
 
 MIN_OBSERVATIONS = 60
