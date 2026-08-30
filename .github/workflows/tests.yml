@@ -25,3 +25,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         run: pytest -q
+      - name: Run canonical backtest parameter matrix
+        run: python scripts/backtest_parameter_matrix.py
