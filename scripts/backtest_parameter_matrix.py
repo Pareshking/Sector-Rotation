@@ -7,6 +7,7 @@ did, and where holdings/cash decisions differ.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -19,6 +20,10 @@ DATA = ROOT / "data" / "processed" / "index_prices.parquet"
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, help="Optional CSV output path")
+    args = parser.parse_args()
+
     if not DATA.exists():
         raise SystemExit(f"Missing canonical data: {DATA}")
 
@@ -76,10 +81,10 @@ def main() -> None:
             )
 
     result = pd.DataFrame(rows)
-    output = ROOT / "backtest_parameter_matrix.csv"
-    result.to_csv(output, index=False)
     print(result.to_string(index=False))
-    print(f"\nWrote {output}")
+    if args.output:
+        result.to_csv(args.output, index=False)
+        print(f"\nWrote {args.output}")
 
 
 if __name__ == "__main__":
