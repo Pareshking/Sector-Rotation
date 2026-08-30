@@ -14,7 +14,10 @@ from src.data.yahoo import download_history
 from src.models.exposure import ETFMapping
 
 MIN_OBSERVATIONS = 60
-MAX_MFAPI_WORKERS = 5
+# The vehicle count roughly tripled (32 -> 104) when index funds were added, and
+# the run outgrew its 45-minute CI budget at the old fan-out. These are IO-bound
+# HTTP fetches, so more threads is the cheap fix; both hosts tolerate this rate.
+MAX_MFAPI_WORKERS = 12
 NETWORK_TIMEOUT = (5, 10)
 
 
@@ -121,7 +124,7 @@ def fetch_etf_histories(
     # 1. NSE, for anything with a trading symbol.
     listed = {etf.symbol: etf for etf in etf_list if etf.symbol}
     if listed:
-        for symbol, series in fetch_nse_histories(list(listed), years=years).items():
+        for symbol, series in fetch_nse_histories(list(listed), years=years, workers=12).items():
             columns[symbol] = series.rename(symbol)
             sources[symbol] = "nse"
 

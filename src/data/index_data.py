@@ -35,7 +35,7 @@ def download_canonical_indices(
 ) -> pd.DataFrame:
     """Resolve decision-grade canonical histories with strict provenance."""
     prices, sources, resolved, value_types = fetch_jugaad_canonical_indices(
-        exposure_names, years=years, workers=6
+        exposure_names, years=years, workers=10
     )
 
     missing = {

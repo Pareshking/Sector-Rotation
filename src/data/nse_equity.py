@@ -64,7 +64,7 @@ def fetch_nse_history(symbol: str, years: int = 5) -> pd.Series:
     return series
 
 
-def fetch_nse_histories(symbols, years: int = 5, workers: int = 6) -> dict[str, pd.Series]:
+def fetch_nse_histories(symbols, years: int = 5, workers: int = 12) -> dict[str, pd.Series]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     clean = [s for s in symbols if s]
