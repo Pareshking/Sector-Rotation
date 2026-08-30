@@ -28,29 +28,57 @@ def download_market_history(symbols: Iterable[str], years: int = 5) -> pd.DataFr
     return download_history(clean, years=years)
 
 
-def _amfi_fallback(etf: ETFMapping, days: int = 90) -> pd.Series:
-    code = str(etf.scheme_code) if etf.scheme_code is not None else None
-    if code is None:
+def _amfi_fallback_batch(etfs: list[ETFMapping], days: int = 90) -> dict[str, pd.Series]:
+    """Resolve every vehicle AMFI must serve from one shared download, not one per vehicle.
+
+    AMFI's historical-NAV report returns every scheme's NAV for the requested
+    date window regardless of which single scheme you actually want — it is a
+    market-wide dump, not a per-scheme lookup, and it can take minutes to fully
+    stream (its read-timeout only resets per chunk received, so a slow trickle
+    never actually trips it). Looping this per vehicle re-downloads that same
+    multi-year, whole-market report once for every vehicle that needs it; a
+    handful of vehicles falling through NSE and MFAPI on one run was enough to
+    turn a multi-minute pipeline into one that never finished. Fetching scheme
+    codes and history once for the whole batch turns that into one download.
+    """
+    if not etfs:
+        return {}
+    named = [etf for etf in etfs if etf.scheme_code is None]
+    resolved_codes: dict[str, str] = {}
+    if named:
         current = fetch_amfi_nav(timeout=NETWORK_TIMEOUT)
-        codes = find_scheme_codes(current, [etf.name])
-        code = codes.get(etf.name)
-    if not code:
-        return pd.Series(dtype="float64", name=etf.symbol or etf.name)
+        resolved_codes = find_scheme_codes(current, [etf.name for etf in named])
+
+    code_by_key: dict[str, str] = {}
+    for etf in etfs:
+        key = etf.symbol or etf.name
+        code = str(etf.scheme_code) if etf.scheme_code is not None else resolved_codes.get(etf.name)
+        if code:
+            code_by_key[key] = code
+    if not code_by_key:
+        return {}
+
     history = fetch_amfi_history(
         date.today() - timedelta(days=days),
         date.today(),
-        scheme_codes=[code],
+        scheme_codes=list(set(code_by_key.values())),
         timeout=NETWORK_TIMEOUT,
         chunk_days=365,
     )
     if history.empty:
-        return pd.Series(dtype="float64", name=etf.symbol or etf.name)
-    return (
-        history.loc[history["scheme_code"].eq(code)]
-        .set_index("date")["nav"]
-        .rename(etf.symbol or etf.name)
-        .sort_index()
-    )
+        return {}
+
+    results: dict[str, pd.Series] = {}
+    for key, code in code_by_key.items():
+        series = (
+            history.loc[history["scheme_code"].eq(code)]
+            .set_index("date")["nav"]
+            .rename(key)
+            .sort_index()
+        )
+        if series.size >= MIN_OBSERVATIONS:
+            results[key] = series
+    return results
 
 
 def _fetch_one_mfapi(etf: ETFMapping) -> tuple[ETFMapping, pd.Series, int | None]:
@@ -141,18 +169,16 @@ def fetch_etf_histories(
         sources.update({key: "mfapi" for key in mfapi_columns})
         unresolved.extend(mfapi_unresolved)
 
-    # 3. AMFI official NAV before any third-party mirror.
-    for etf in list(unresolved):
-        key = etf.symbol or etf.name
-        if key in columns:
-            continue
-        try:
-            fallback = _amfi_fallback(etf, days=365 * years + 30)
-        except Exception:
-            fallback = pd.Series(dtype="float64", name=key)
-        if fallback.size >= MIN_OBSERVATIONS:
-            columns[key] = fallback.rename(key)
-            sources[key] = "amfi"
+    # 3. AMFI official NAV before any third-party mirror. One shared download
+    # for the whole remaining batch — see _amfi_fallback_batch for why looping
+    # this per vehicle was the actual cause of runs that never finished.
+    try:
+        amfi_columns = _amfi_fallback_batch(list(unresolved), days=365 * years + 30)
+    except Exception:
+        amfi_columns = {}
+    for key, series in amfi_columns.items():
+        columns[key] = series
+        sources[key] = "amfi"
 
     unresolved = [etf for etf in unresolved if (etf.symbol or etf.name) not in columns]
 

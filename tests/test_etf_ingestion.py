@@ -51,7 +51,9 @@ def test_amfi_is_tried_before_yahoo(monkeypatch):
     _no_nse(monkeypatch)
     monkeypatch.setattr(etf_data, "fetch_all_mfapi_histories", lambda *a, **k: ({}, {}, [etf]))
     nav = pd.Series(range(1, 200), index=pd.date_range("2026-01-01", periods=199))
-    monkeypatch.setattr(etf_data, "_amfi_fallback", lambda *a, **k: nav)
+    monkeypatch.setattr(
+        etf_data, "_amfi_fallback_batch", lambda etfs, **k: {"Kotak Nifty Realty Index Fund": nav}
+    )
     monkeypatch.setattr(etf_data, "download_market_history",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("Yahoo must not run")))
 
@@ -102,13 +104,43 @@ def test_scheme_without_complete_mfapi_can_fall_back_to_yahoo(monkeypatch):
 
     monkeypatch.setattr(etf_data, "fetch_etf_nav", lambda *args, **kwargs: empty)
     # AMFI now sits ahead of Yahoo; it must come up empty for Yahoo to be reached.
-    monkeypatch.setattr(etf_data, "_amfi_fallback", lambda *a, **k: pd.Series(dtype="float64"))
+    monkeypatch.setattr(etf_data, "_amfi_fallback_batch", lambda etfs, **k: {})
     monkeypatch.setattr(etf_data, "download_market_history", lambda *args, **kwargs: yahoo)
 
     frame, sources, _ = etf_data.fetch_etf_histories([etf])
 
     assert "B22" in frame
     assert sources["B22"] == "yahoo"
+
+
+def test_amfi_fallback_downloads_the_market_report_once_for_the_whole_batch(monkeypatch):
+    """AMFI's history endpoint returns every scheme for the requested window
+    regardless of which one you want, and can take minutes to stream. Calling
+    it once per vehicle instead of once per batch is what turned a handful of
+    fallback vehicles into a pipeline run that never finished.
+    """
+    _no_nse(monkeypatch)
+    etf_a = ETFMapping(name="Fund A", scheme_code=1001, vehicle="index_fund")
+    etf_b = ETFMapping(name="Fund B", scheme_code=1002, vehicle="index_fund")
+    monkeypatch.setattr(etf_data, "fetch_all_mfapi_histories", lambda *a, **k: ({}, {}, [etf_a, etf_b]))
+    monkeypatch.setattr(etf_data, "download_market_history", lambda *a, **k: pd.DataFrame())
+
+    calls = {"n": 0}
+    dates = pd.date_range("2026-01-01", periods=100)
+
+    def fake_history(*args, **kwargs):
+        calls["n"] += 1
+        codes = kwargs["scheme_codes"]
+        rows = [{"scheme_code": code, "nav": 100.0 + i, "date": d} for code in codes for i, d in enumerate(dates)]
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(etf_data, "fetch_amfi_history", fake_history)
+
+    _, sources, _ = etf_data.fetch_etf_histories([etf_a, etf_b])
+
+    assert calls["n"] == 1, "AMFI history must be fetched once for the batch, not once per vehicle"
+    assert sources["Fund A"] == "amfi"
+    assert sources["Fund B"] == "amfi"
 
 
 def test_snapshot_merge_matches_on_nse_symbol():
