@@ -8,8 +8,9 @@ import pandas as pd
 
 from src.data.amfi import fetch_amfi_nav
 from src.data.amfi_history import fetch_amfi_history, find_scheme_codes
-from src.data.index_data import download_history
 from src.data.mfapi import fetch_etf_nav
+from src.data.nse_equity import fetch_nse_histories
+from src.data.yahoo import download_history
 from src.models.exposure import ETFMapping
 
 MIN_OBSERVATIONS = 60
@@ -103,32 +104,56 @@ def fetch_all_mfapi_histories(
 def fetch_etf_histories(
     etfs: Iterable[ETFMapping], years: int = 5
 ) -> tuple[pd.DataFrame, dict[str, str], dict[str, int]]:
-    """Build ETF history using bounded-concurrent MFAPI -> Yahoo -> AMFI fallback.
+    """Build ETF history with the exchange first and Yahoo last.
 
-    A mapped AMFI scheme is authoritative for the continuous NAV leg. Yahoo is
-    bypassed whenever MFAPI supplies at least MIN_OBSERVATIONS rows. Instruments
-    without a scheme code, or mapped schemes whose MFAPI request fails/returns
-    insufficient data, proceed to the secondary Yahoo market-price leg.
+    Order is NSE -> MFAPI -> AMFI -> Yahoo. An ETF is an NSE-listed security, so
+    the exchange has its traded history and there is no reason to ask a
+    third-party mirror first; open-ended index funds are not listed at all and
+    resolve through AMFI's scheme NAV. Yahoo remains only as a last resort,
+    because a Yahoo outage previously dropped three otherwise healthy ETFs
+    (ITBEES, HEALTHIETF, SBIETFIT) out of the dataset entirely.
     """
     etf_list = list(etfs)
     columns: dict[str, pd.Series] = {}
     sources: dict[str, str] = {}
     resolved_codes: dict[str, int] = {}
-    unresolved: list[ETFMapping] = []
 
-    mapped = [etf for etf in etf_list if etf.scheme_code is not None]
-    direct_yahoo = [etf for etf in etf_list if etf.scheme_code is None]
+    # 1. NSE, for anything with a trading symbol.
+    listed = {etf.symbol: etf for etf in etf_list if etf.symbol}
+    if listed:
+        for symbol, series in fetch_nse_histories(list(listed), years=years).items():
+            columns[symbol] = series.rename(symbol)
+            sources[symbol] = "nse"
 
+    def _done(etf) -> bool:
+        return (etf.symbol or etf.name) in columns
+
+    # 2. MFAPI scheme NAV for whatever NSE could not serve.
+    mapped = [etf for etf in etf_list if etf.scheme_code is not None and not _done(etf)]
+    unresolved: list[ETFMapping] = [etf for etf in etf_list if etf.scheme_code is None and not _done(etf)]
     if mapped:
         mfapi_columns, mfapi_codes, mfapi_unresolved = fetch_all_mfapi_histories(mapped)
         columns.update(mfapi_columns)
         resolved_codes.update(mfapi_codes)
         sources.update({key: "mfapi" for key in mfapi_columns})
         unresolved.extend(mfapi_unresolved)
-    unresolved.extend(direct_yahoo)
 
-    # Secondary market-price leg: only instruments without a complete MFAPI
-    # series reach Yahoo. Never invoke the downloader for an empty candidate set.
+    # 3. AMFI official NAV before any third-party mirror.
+    for etf in list(unresolved):
+        key = etf.symbol or etf.name
+        if key in columns:
+            continue
+        try:
+            fallback = _amfi_fallback(etf, days=365 * years + 30)
+        except Exception:
+            fallback = pd.Series(dtype="float64", name=key)
+        if fallback.size >= MIN_OBSERVATIONS:
+            columns[key] = fallback.rename(key)
+            sources[key] = "amfi"
+
+    unresolved = [etf for etf in unresolved if (etf.symbol or etf.name) not in columns]
+
+    # 4. Yahoo, last. Only instruments no authoritative source could serve.
     market_symbols = [etf.yfinance_symbol for etf in unresolved if etf.yfinance_symbol]
     if market_symbols:
         market = download_market_history(market_symbols, years=years)
@@ -146,19 +171,5 @@ def fetch_etf_histories(
                     continue
                 columns[etf_key] = series.rename(etf_key)
                 sources[etf_key] = "yahoo"
-
-    # Emergency official AMFI history for anything still unresolved. This path
-    # is intentionally last so it cannot cause broad Yahoo/MFAPI duplication.
-    for etf in unresolved:
-        key = etf.symbol or etf.name
-        if key in columns:
-            continue
-        try:
-            fallback = _amfi_fallback(etf, days=365 * years + 30)
-        except Exception:
-            fallback = pd.Series(dtype="float64", name=key)
-        if fallback.size >= MIN_OBSERVATIONS:
-            columns[key] = fallback.rename(key)
-            sources[key] = "amfi"
 
     return pd.DataFrame(columns).sort_index(), sources, resolved_codes

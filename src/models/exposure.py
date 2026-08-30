@@ -19,9 +19,23 @@ class TrackingMetrics(BaseModel):
     tracking_error: Optional[float] = Field(default=None, ge=0)
 
 
+class VehicleType(str, Enum):
+    """How a holding is actually bought.
+
+    An ETF transacts on-exchange at a price that can sit above or below NAV; an
+    open-ended index fund transacts at NAV with no spread or premium. For a
+    monthly rebalance the index fund is often the better vehicle, so the two are
+    tracked separately rather than lumped together.
+    """
+
+    ETF = "etf"
+    INDEX_FUND = "index_fund"
+
+
 class ETFMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
     symbol: Optional[str] = Field(default=None, min_length=1)
+    vehicle: VehicleType = VehicleType.ETF
     name: str = Field(min_length=1)
     scheme_code: Optional[int] = Field(default=None, gt=0)
     yfinance_symbol: Optional[str] = None
@@ -60,3 +74,7 @@ class Exposure(BaseModel):
     @property
     def tradable(self) -> bool:
         return bool(self.etfs)
+
+    @property
+    def exchange_traded(self) -> list["ETFMapping"]:
+        return [e for e in self.etfs if e.vehicle is VehicleType.ETF]

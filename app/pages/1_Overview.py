@@ -9,72 +9,134 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.metrics import data_health_banner, decision_frame, get_metadata, metric_row
-from app.components.theme import inject_theme, page_header, render_decision_cards, render_rank_list, section
-from app.data import load_summary
+from app.components.charts import CHART_CONFIG, stage_distribution
+from app.components.metrics import action_counts, data_health_banner
+from app.components.tables import BASES, BASIS_RELATIVE, action_board, ranked_table
+from app.components.theme import (
+    inject_theme,
+    kpi_strip,
+    note,
+    page_header,
+    section,
+    stage_legend,
+)
+from app.data import load_decisions, load_rs
 
 inject_theme()
 page_header(
     "India Sector Rotation",
     "Decision Dashboard",
-    "A clean, decision-first view of sector and theme rotation. BUY and REDUCE / EXIT are earned by the model conditions — not by rank alone.",
+    "What the model says to do today, and the evidence behind it. BUY and REDUCE / EXIT are "
+    "earned by the signal conditions — never by rank alone.",
 )
-metadata = get_metadata()
-data_health_banner(metadata)
-summary = load_summary()
-if summary.empty:
+data_health_banner()
+
+decisions = load_decisions()
+if decisions.empty:
     st.warning("Prepared data is not available yet. Run the data pipeline first.")
     st.stop()
 
-metric_row(summary)
-decisions = decision_frame(summary).sort_values("rank")
-buy = decisions[decisions.model_action == "BUY"].sort_values("rank")
-sell = decisions[decisions.model_action == "REDUCE / EXIT"].sort_values("rank")
-watch = decisions[decisions.model_action.isin(["WATCH / IMPROVING", "WATCH"]) & decisions.decision_eligible].sort_values("rank")
-unavailable = decisions[~decisions.decision_eligible].sort_values("rank")
+rs = load_rs()
+counts = action_counts(decisions)
+eligible = decisions[decisions.decision_eligible]
+buy = eligible[eligible.model_action == "BUY"]
+sell = eligible[eligible.model_action == "REDUCE / EXIT"]
+improving = eligible[eligible.model_action == "WATCH / IMPROVING"]
+rolling_over = eligible[eligible.watch_kind == "Rolling over"]
 
-section("Decision rule")
-st.markdown(
-    "**BUY** = Leading stage + RS ratio > 1 + positive RS velocity + positive momentum Z. "
-    "**REDUCE / EXIT** = Weakening or Lagging + RS ratio < 1 + negative RS velocity. "
-    "Rank is a strength ordering only; it is never a BUY/SELL gate."
+kpi_strip(
+    [
+        ("Decision-grade", counts["eligible"], f'of {counts["total"]} exposures', ""),
+        ("Buy", counts["buy"], "full confirmation", "buy"),
+        ("Early turn", counts["improving"], "improving, not confirmed", "blue"),
+        ("Reduce / exit", counts["reduce"], "exit rule triggered", "red"),
+    ]
 )
-
-section("BUY")
-render_decision_cards(
-    buy,
-    limit=20,
-    empty_text="No exposure currently satisfies the complete BUY rule.",
-)
-
-section("REDUCE / EXIT")
-render_decision_cards(
-    sell,
-    limit=20,
-    empty_text="No exposure currently satisfies the REDUCE / EXIT rule.",
-)
-
-section("WATCH")
-render_decision_cards(
-    watch,
-    limit=12,
-    empty_text="No decision-grade watchlist entries.",
-)
-
-section("Decision-grade ranking")
-render_rank_list(decisions[decisions.decision_eligible].sort_values("rank"), limit=20)
-
-if not unavailable.empty:
-    section("Unavailable for decision")
-    st.caption(
-        "These exposures are not replaced with synthetic sector proxies. They remain outside the decision set until an authoritative history is available."
+buyable = int(buy["tradeable"].sum()) if "tradeable" in buy.columns else len(buy)
+if len(buy) and buyable < len(buy):
+    note(
+        f"<b>{len(buy) - buyable} of {len(buy)} BUY signals have no ETF or index fund.</b> "
+        "They are research, not positions. Use the tradeable filter below to see only what you "
+        "can actually put money into.",
+        tone="amber",
     )
-    for r in unavailable.itertuples():
-        st.write(f"• {r.exposure} — {getattr(r, 'decision_reason', 'Authoritative history unavailable.')}")
 
-with st.expander("Detailed model inputs · audit", expanded=False):
+section("Universe breadth", f"Where the {len(eligible)} decision-grade exposures sit in the rotation cycle")
+stage_legend()
+st.plotly_chart(stage_distribution(eligible), width="stretch", config=CHART_CONFIG)
+
+section("Action board", "Ranked within each bucket by composite momentum")
+action_board(
+    [
+        ("Buy", "buy", buy, "No exposure satisfies the complete BUY rule."),
+        ("Early turn · watch", "blue", improving, "Nothing has turned up yet."),
+        ("Reduce / exit", "red", sell, "No exposure satisfies the REDUCE / EXIT rule."),
+    ],
+    limit=8,
+)
+
+if not rolling_over.empty:
+    names = ", ".join(rolling_over.head(6).exposure.tolist())
+    note(
+        f"<b>{len(rolling_over)} leaders are rolling over.</b> Still above the benchmark on RS "
+        f"ratio, but RS velocity has turned negative — leadership is fading before the exit rule "
+        f"triggers: {names}.",
+        tone="amber",
+    )
+
+section("Full ranking", "Click any column header to sort")
+period = st.segmented_control(
+    "Rank by lookback",
+    ["Composite", "1M", "3M", "6M", "12M"],
+    default="Composite",
+    key="overview_lookback",
+    help="Composite is the cross-sectional Z-score blended across all four horizons.",
+)
+basis = st.segmented_control(
+    "Measure",
+    BASES,
+    default=BASIS_RELATIVE,
+    key="overview_basis",
+    help="Relative strength is the model's own measure: exposure return minus Nifty 50 over the "
+    "same window. Absolute is what a holder actually earned.",
+)
+controls = st.columns(2)
+only_grade = controls[0].toggle("Decision-grade only", value=True, key="overview_grade")
+only_tradeable = controls[1].toggle(
+    "Tradeable only", value=False, key="overview_tradeable",
+    help="Keep only exposures with a listed ETF that traded at the last NSE snapshot.",
+)
+table_frame = eligible if only_grade else decisions
+if only_tradeable and "tradeable" in table_frame.columns:
+    table_frame = table_frame[table_frame.tradeable]
+ranked_table(
+    table_frame, rs=rs, sort_by=period or "Composite",
+    basis=basis or BASIS_RELATIVE, key="overview_table",
+)
+
+section("How a decision is reached")
+note(
+    "<b>BUY</b> = Leading stage + RS ratio &gt; 1 + positive RS velocity + positive momentum Z.<br>"
+    "<b>REDUCE / EXIT</b> = Weakening or Lagging + RS ratio &lt; 1 + negative RS velocity.<br>"
+    "<b>Early turn</b> = Improving stage with RS velocity newly positive — below the benchmark, "
+    "but no longer falling behind.<br>"
+    "Rank orders strength; it is never a BUY or SELL gate."
+)
+
+unavailable = decisions[~decisions.decision_eligible]
+if not unavailable.empty:
+    with st.expander(f"Outside the decision set · {len(unavailable)}", expanded=False):
+        st.caption(
+            "Not replaced with synthetic sector proxies. These stay outside the decision set "
+            "until an authoritative history exists."
+        )
+        for row in unavailable.itertuples():
+            st.write(f"• {row.exposure} — {getattr(row, 'decision_reason', 'History unavailable.')}")
+
+with st.expander("Model inputs · audit", expanded=False):
     st.dataframe(decisions, width="stretch", hide_index=True)
 
 st.caption(
-    "The dashboard is a quantitative decision aid. Verify the underlying ETF, liquidity, tracking quality and implementation before placing an order."
+    "A quantitative decision aid, not advice. Verify the underlying ETF, liquidity, tracking "
+    "quality and implementation before placing an order."
 )
