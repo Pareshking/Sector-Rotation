@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import streamlit as st
 
@@ -15,16 +15,18 @@ st.set_page_config(
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Use Streamlit's native top navigation instead of the sidebar. This is the
-# critical mobile fix: every research view remains one tap away on a phone.
+PAGES_DIR = ROOT / "app" / "pages"
+
+# Top navigation keeps every research view one tap away. ``url_path`` is set
+# explicitly so page URLs stay stable when files are renamed or reordered.
 pages = [
-    st.Page(ROOT / "app" / "pages" / "1_Overview.py", title="Overview", icon="📊", default=True),
-    st.Page(ROOT / "app" / "pages" / "2_Sectors.py", title="Sectors", icon="🏭"),
-    st.Page(ROOT / "app" / "pages" / "3_Themes.py", title="Themes", icon="🧭"),
-    st.Page(ROOT / "app" / "pages" / "4_Rankings.py", title="Rankings", icon="📈"),
-    st.Page(ROOT / "app" / "pages" / "5_ETF_Detail.py", title="ETF Detail", icon="💹"),
-    st.Page(ROOT / "app" / "pages" / "6_System_Health.py", title="System Health", icon="🛡️"),
+    st.Page(PAGES_DIR / "1_Overview.py", title="Dashboard", icon="📊", url_path="Overview", default=True),
+    st.Page(PAGES_DIR / "2_Sectors.py", title="Sectors", icon="🏭", url_path="Sectors"),
+    st.Page(PAGES_DIR / "3_Themes.py", title="Themes", icon="🧭", url_path="Themes"),
+    st.Page(PAGES_DIR / "4_Rankings.py", title="Screener", icon="🔎", url_path="Rankings"),
+    st.Page(PAGES_DIR / "5_Backtest.py", title="Backtest", icon="📈", url_path="Backtest"),
+    st.Page(PAGES_DIR / "6_ETF_Detail.py", title="Exposure", icon="💹", url_path="ETF_Detail"),
+    st.Page(PAGES_DIR / "7_System_Health.py", title="Data Health", icon="🛡️", url_path="System_Health"),
 ]
 
-pg = st.navigation(pages, position="top", expanded=False)
-pg.run()
+st.navigation(pages, position="top", expanded=False).run()

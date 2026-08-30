@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.data.amfi import fetch_amfi_nav
 from src.data.amfi_history import fetch_amfi_history, find_scheme_codes
-from src.data.index_data import download_history
+from src.data.yahoo import download_history
 from src.data.mfapi import fetch_etf_nav
 from src.models.exposure import ETFMapping
 

@@ -1,13 +1,45 @@
+"""Decision boundary, data-health telemetry, and lineage helpers."""
+
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from app.components.theme import _esc, fmt_num, fmt_signed
+
 ROOT = Path(__file__).resolve().parents[2]
 METADATA_PATH = ROOT / "data" / "processed" / "metadata.json"
+
+PROXY_SOURCES = {"benchmark_proxy", "etf_proxy"}
+
+# Friendly labels for pipeline source codes. Unknown codes fall back to a
+# prettified version of the code itself, so a new adapter never renders as a
+# blank or a raw identifier the way ``niftyindices_jugaad`` previously did.
+SOURCE_LABELS = {
+    "niftyindices_jugaad": "NSE / NiftyIndices via jugaad-data",
+    "niftyindices_tri": "NiftyIndices · TRI endpoint",
+    "niftyindices_pr": "NiftyIndices · price endpoint",
+    "nse_archive": "NSE archive",
+    "nse_api": "NSE API",
+    "nse": "NSE",
+    "yahoo": "Yahoo Finance",
+    "mfapi": "MFAPI NAV",
+    "amfi": "AMFI NAV",
+    "seed_cache": "Seeded canonical",
+    "benchmark_proxy": "Excluded · benchmark proxy",
+    "etf_proxy": "Excluded · ETF/NAV proxy",
+}
+
+
+def source_label(code: object) -> str:
+    key = str(code or "").strip()
+    if not key:
+        return "—"
+    return SOURCE_LABELS.get(key, key.replace("_", " ").title())
 
 
 def _metadata_mtime() -> int:
@@ -32,27 +64,82 @@ def get_metadata() -> dict[str, object]:
     return load_metadata(_metadata_mtime())
 
 
-def data_health_banner(metadata: dict[str, object] | None = None) -> None:
+def format_updated(raw: object) -> tuple[str, str]:
+    """Return (absolute, relative) labels for the pipeline timestamp.
+
+    The raw value is a microsecond ISO string, which is unreadable in a header.
+    """
+    text = str(raw or "")
+    try:
+        stamp = datetime.fromisoformat(text)
+    except ValueError:
+        return (text or "unknown", "")
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    absolute = stamp.strftime("%d %b %Y · %H:%M UTC")
+    hours = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600.0
+    if hours < 1:
+        relative = "just now"
+    elif hours < 24:
+        relative = f"{int(hours)}h ago"
+    else:
+        relative = f"{int(hours // 24)}d ago"
+    return absolute, relative
+
+
+def health_summary(metadata: dict[str, object] | None = None) -> dict[str, object]:
     metadata = metadata if metadata is not None else get_metadata()
     if not metadata:
-        st.error("Data health · metadata unavailable")
-        return
-
+        return {}
+    source_map = metadata.get("source_by_canonical_exposure", {}) or {}
+    proxy = sum(value in PROXY_SOURCES for value in source_map.values())
     canonical = int(metadata.get("valid_canonical_series", 0))
     total = int(metadata.get("total_canonical_exposures", 0))
-    coverage = float(metadata.get("canonical_coverage_ratio", 0.0))
-    etf = int(metadata.get("etf_valid_series", 0))
-    etf_total = int(metadata.get("etf_total", 0))
-    skipped = metadata.get("skipped_canonical_exposures", []) or []
-    source_map = metadata.get("source_by_canonical_exposure", {}) or {}
-    proxy_count = sum(v in {"benchmark_proxy", "etf_proxy"} for v in source_map.values())
-    decision_grade = max(canonical - proxy_count, 0)
-    updated = str(metadata.get("last_updated_utc", "unknown"))
-    status = "VERIFIED" if coverage >= 1.0 and not skipped and proxy_count == 0 else "ATTENTION"
-    cls = "sr-callout-good" if status == "VERIFIED" else "sr-callout"
+    skipped = list(metadata.get("skipped_canonical_exposures", []) or [])
+    absolute, relative = format_updated(metadata.get("last_updated_utc"))
+    return {
+        "canonical": canonical,
+        "total": total,
+        "proxy": proxy,
+        "decision_grade": max(canonical - proxy, 0),
+        "skipped": skipped,
+        "etf_valid": int(metadata.get("etf_valid_series", 0)),
+        "etf_total": int(metadata.get("etf_total", 0)),
+        "etf_skipped": list(metadata.get("etf_skipped_symbols", []) or []),
+        "missing_yfinance": list(metadata.get("missing_yfinance_symbols", []) or []),
+        "warnings": list(metadata.get("validation_warnings", []) or []),
+        "updated": absolute,
+        "age": relative,
+        "healthy": bool(
+            metadata.get("canonical_coverage_ratio", 0.0) >= 1.0 and not skipped and proxy == 0
+        ),
+    }
 
+
+def data_health_banner(metadata: dict[str, object] | None = None) -> None:
+    """One compact line of provenance, above the fold on every page."""
+    health = health_summary(metadata)
+    if not health:
+        st.markdown(
+            '<div class="hs hs-warn">Data health · prepared metadata is unavailable</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    tone = "" if health["healthy"] else " hs-warn"
+    etf_note = f'{health["etf_valid"]}/{health["etf_total"]} ETF price histories'
+    proxy_note = (
+        f'<span class="hs-sep">|</span><span><b>{health["proxy"]}</b> proxy excluded</span>'
+        if health["proxy"]
+        else ""
+    )
+    age = f' · {_esc(health["age"])}' if health["age"] else ""
     st.markdown(
-        f'''<div class="sr-card {cls}" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><div class="sr-card-label">Data health</div><div class="sr-card-value">{canonical}/{total} canonical histories</div><div class="sr-card-note">{decision_grade} decision-grade · {proxy_count} proxy histories excluded · {etf}/{etf_total} ETF histories</div></div><div style="text-align:right;font-size:.7rem;white-space:nowrap"><strong>{status}</strong><br>{updated}</div></div></div>''',
+        f'<div class="hs{tone}">'
+        f'<span><b>{health["decision_grade"]}/{health["total"]}</b> decision-grade histories</span>'
+        f"{proxy_note}"
+        f'<span class="hs-sep">|</span><span>{_esc(etf_note)}</span>'
+        f'<span class="hs-time">Updated {_esc(health["updated"])}{age}</span>'
+        "</div>",
         unsafe_allow_html=True,
     )
 
@@ -62,66 +149,99 @@ def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
     source_map = metadata.get("source_by_canonical_exposure", {}) or {}
     name_map = metadata.get("resolved_official_index_names", {}) or {}
     rows = [
-        {"exposure": exposure, "source": source, "resolved_name": name_map.get(exposure, exposure)}
+        {
+            "exposure": exposure,
+            "source": source_label(source),
+            "resolved_name": name_map.get(exposure, "—"),
+        }
         for exposure, source in source_map.items()
     ]
-    return pd.DataFrame(rows).sort_values("exposure") if rows else pd.DataFrame(columns=["exposure", "source", "resolved_name"])
+    if not rows:
+        return pd.DataFrame(columns=["exposure", "source", "resolved_name"])
+    return pd.DataFrame(rows).sort_values("exposure", ignore_index=True)
 
 
-def _num(value: object, digits: int = 2) -> str:
-    try:
-        value = float(value)
-        return "—" if pd.isna(value) else f"{value:.{digits}f}"
-    except (TypeError, ValueError):
-        return "—"
-
-
-def _signed(value: object, digits: int = 2) -> str:
-    try:
-        value = float(value)
-        return "—" if pd.isna(value) else f"{value:+.{digits}f}"
-    except (TypeError, ValueError):
-        return "—"
-
-
-def _analysis_note(row: pd.Series, action: str) -> str:
+def _analysis_note(row: dict[str, object], action: str) -> str:
     stage = str(row.get("stage", "Unknown"))
-    ratio = pd.to_numeric(row.get("rs_ratio"), errors="coerce")
-    velocity = pd.to_numeric(row.get("rs_momentum"), errors="coerce")
-    momentum = pd.to_numeric(row.get("momentum_z"), errors="coerce")
-    rank = row.get("rank")
-    rank_text = f"Rank {int(rank)}" if pd.notna(pd.to_numeric(rank, errors="coerce")) else "Rank unavailable"
+    ratio = fmt_num(row.get("rs_ratio"))
+    velocity = fmt_signed(row.get("rs_momentum"))
+    momentum = fmt_signed(row.get("momentum_z"))
+    rank = pd.to_numeric(row.get("rank"), errors="coerce")
+    rank_text = f"Rank {int(rank)}" if rank == rank else "Rank unavailable"
 
     if action == "BUY":
-        return f"{stage}; RS ratio {_num(ratio)} (> 1); RS velocity {_signed(velocity)} (> 0); momentum Z {_signed(momentum)} (> 0). {rank_text} is informational — rank does not gate BUY."
+        return (
+            f"{stage}; RS ratio {ratio} (> 1); RS velocity {velocity} (> 0); "
+            f"momentum Z {momentum} (> 0). {rank_text} is informational — rank does not gate BUY."
+        )
     if action == "REDUCE / EXIT":
-        return f"{stage}; RS ratio {_num(ratio)} (< 1); RS velocity {_signed(velocity)} (< 0). {rank_text} is informational — the exit rule is signal-based, not rank-based."
+        return (
+            f"{stage}; RS ratio {ratio} (< 1); RS velocity {velocity} (< 0). "
+            f"{rank_text} is informational — the exit rule is signal-based, not rank-based."
+        )
     if action == "WATCH / IMPROVING":
-        return f"{stage}; RS ratio {_num(ratio)} and RS velocity {_signed(velocity)} are improving, but the full BUY confirmation is not yet present. {rank_text}."
+        return (
+            f"{stage}; RS ratio {ratio} is still below the benchmark but RS velocity {velocity} "
+            f"has turned positive. This is an early turn, not a confirmed BUY. {rank_text}."
+        )
     if action == "DATA UNAVAILABLE":
-        return "No authoritative decision-grade index history is available. Excluded from BUY/REDUCE decisions rather than replaced with a proxy."
+        return (
+            "No authoritative decision-grade index history is available. Excluded from "
+            "BUY/REDUCE decisions rather than replaced with a proxy."
+        )
+    if stage == "Weakening":
+        return (
+            f"{stage}; RS ratio {ratio} is still above the benchmark but RS velocity {velocity} "
+            f"has rolled over. Leadership is fading before the exit rule triggers. {rank_text}."
+        )
     return f"{stage}; the full BUY or REDUCE confirmation is not present. {rank_text}."
+
+
+def _shared_index_map(frame: pd.DataFrame) -> pd.Series:
+    """Flag exposures that resolve to the same underlying Nifty index.
+
+    NBFC and Financial Services ex-Bank both resolve to NIFTY FINANCIAL
+    SERVICES EX-BANK, so they occupy two ranks while representing one bet.
+    Surfacing that beats silently de-duplicating it.
+    """
+    blank = pd.Series([None] * len(frame), index=frame.index, dtype=object)
+    key_col = "resolved_official_index_name"
+    if key_col not in frame.columns or "exposure" not in frame.columns:
+        return blank
+    keys = frame[key_col].fillna("").astype(str)
+    out = blank.copy()
+    for key, group in frame.groupby(keys):
+        if not key or len(group) < 2:
+            continue
+        for idx in group.index:
+            peers = [str(x) for i, x in group["exposure"].items() if i != idx]
+            out.at[idx] = ", ".join(peers)
+    return out
 
 
 def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
     """Apply the deterministic decision boundary to prepared model output."""
-    if summary.empty:
-        return summary.copy()
+    if summary is None or summary.empty:
+        return summary.copy() if summary is not None else pd.DataFrame()
 
     frame = summary.copy()
+    nan = pd.Series(float("nan"), index=frame.index)
     source = frame.get("data_source", pd.Series("", index=frame.index)).fillna("").astype(str)
     stage = frame.get("stage", pd.Series("", index=frame.index)).fillna("").astype(str)
-    ratio = pd.to_numeric(frame.get("rs_ratio", pd.Series(float("nan"), index=frame.index)), errors="coerce")
-    velocity = pd.to_numeric(frame.get("rs_momentum", pd.Series(float("nan"), index=frame.index)), errors="coerce")
-    momentum = pd.to_numeric(frame.get("momentum_z", pd.Series(float("nan"), index=frame.index)), errors="coerce")
+    ratio = pd.to_numeric(frame.get("rs_ratio", nan), errors="coerce")
+    velocity = pd.to_numeric(frame.get("rs_momentum", nan), errors="coerce")
+    momentum = pd.to_numeric(frame.get("momentum_z", nan), errors="coerce")
 
     # Proxy histories are never decision data. This also protects the UI from
     # stale processed datasets until the next clean live pipeline refresh.
-    proxy = source.isin({"benchmark_proxy", "etf_proxy"})
+    proxy = source.isin(PROXY_SOURCES)
     valid = ratio.notna() & velocity.notna() & momentum.notna()
     buy = (~proxy) & valid & stage.eq("Leading") & ratio.gt(1.0) & velocity.gt(0) & momentum.gt(0)
     reduce = (~proxy) & valid & stage.isin(["Weakening", "Lagging"]) & ratio.lt(1.0) & velocity.lt(0)
-    improving = (~proxy) & valid & stage.eq("Improving") & ratio.gt(1.0) & velocity.gt(0)
+    # An Improving exposure is by definition below the benchmark (rs_stage puts
+    # rs_ratio < 1 with rising momentum here), so the previous ``ratio > 1``
+    # clause could never be satisfied and this bucket never rendered.
+    improving = (~proxy) & valid & stage.eq("Improving") & velocity.gt(0)
 
     frame["decision_eligible"] = (~proxy) & valid
     frame["model_action"] = "WATCH"
@@ -132,23 +252,40 @@ def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
     frame.loc[reduce, "model_action"] = "REDUCE / EXIT"
 
     frame["decision_reason"] = "Full BUY/REDUCE confirmation is not present"
-    frame.loc[buy, "decision_reason"] = "Leading + RS ratio > 1 + positive RS velocity + positive momentum"
+    frame.loc[buy, "decision_reason"] = (
+        "Leading + RS ratio > 1 + positive RS velocity + positive momentum"
+    )
     frame.loc[reduce, "decision_reason"] = "Weakening/Lagging + RS ratio < 1 + negative RS velocity"
-    frame.loc[improving, "decision_reason"] = "Improving + RS ratio > 1 + positive RS velocity"
-    frame.loc[proxy, "decision_reason"] = "No authoritative history; proxy data is deliberately excluded"
+    frame.loc[improving, "decision_reason"] = "Improving + RS velocity has turned positive"
+    frame.loc[proxy, "decision_reason"] = (
+        "No authoritative history; proxy data is deliberately excluded"
+    )
     frame.loc[~valid & ~proxy, "decision_reason"] = "Required RS/momentum input is unavailable"
-    frame["analysis_note"] = frame.apply(lambda row: _analysis_note(row, str(row["model_action"])), axis=1)
+
+    # Presentation-only sub-state. It never changes BUY/REDUCE, but it stops a
+    # rolling-over rank-1 leader from looking identical to a flat neutral name.
+    frame["watch_kind"] = ""
+    plain_watch = frame["model_action"].eq("WATCH")
+    frame.loc[plain_watch & stage.eq("Weakening"), "watch_kind"] = "Rolling over"
+    frame.loc[plain_watch & stage.eq("Leading"), "watch_kind"] = "Holding"
+    frame.loc[frame["model_action"].eq("WATCH / IMPROVING"), "watch_kind"] = "Early turn"
+
+    frame["shares_index_with"] = _shared_index_map(frame)
+    frame["analysis_note"] = [
+        _analysis_note(row, str(row["model_action"])) for row in frame.to_dict("records")
+    ]
     return frame
 
 
-def metric_row(summary: pd.DataFrame) -> None:
-    frame = decision_frame(summary)
-    total = len(frame)
-    eligible = int(frame["decision_eligible"].sum()) if not frame.empty else 0
-    buy = int((frame["model_action"] == "BUY").sum()) if not frame.empty else 0
-    reduce = int((frame["model_action"] == "REDUCE / EXIT").sum()) if not frame.empty else 0
-    cols = st.columns(4)
-    cols[0].metric("Exposures", total)
-    cols[1].metric("Decision-grade", eligible)
-    cols[2].metric("BUY", buy)
-    cols[3].metric("REDUCE / EXIT", reduce)
+def action_counts(frame: pd.DataFrame) -> dict[str, int]:
+    if frame is None or frame.empty:
+        return {"total": 0, "eligible": 0, "buy": 0, "reduce": 0, "improving": 0, "watch": 0}
+    action = frame["model_action"]
+    return {
+        "total": len(frame),
+        "eligible": int(frame["decision_eligible"].sum()),
+        "buy": int((action == "BUY").sum()),
+        "reduce": int((action == "REDUCE / EXIT").sum()),
+        "improving": int((action == "WATCH / IMPROVING").sum()),
+        "watch": int((action == "WATCH").sum()),
+    }

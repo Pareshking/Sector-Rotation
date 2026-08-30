@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.components.charts import CHART_CONFIG, drawdown_chart, etf_comparison, price_chart, rs_trajectory
+from app.components.metrics import source_label
+from app.components.tables import clean_table
+from app.components.theme import (
+    ACTION_CLASS,
+    _esc,
+    fmt_num,
+    fmt_pct,
+    inject_theme,
+    kpi_strip,
+    note,
+    page_header,
+    section,
+)
+from app.data import load_decisions, load_etf_prices, load_etfs, load_rs
+
+inject_theme()
+page_header(
+    "Implementation",
+    "Exposure Detail",
+    "Start with the model decision, understand why it was reached, then validate the vehicle you "
+    "would actually buy.",
+)
+
+decisions = load_decisions()
+if decisions.empty:
+    st.info("No prepared model data is available.")
+    st.stop()
+
+etfs = load_etfs()
+rs = load_rs()
+etf_prices = load_etf_prices()
+
+# Every exposure is selectable, not only the ones with a mapped ETF. Restricting
+# the picker to ETF rows hid 25 of 43 exposures from this page entirely.
+options = decisions.exposure.tolist()
+exposure = st.selectbox("Exposure", options, key="detail_exposure")
+signal = decisions[decisions.exposure == exposure].iloc[0]
+selected = etfs[etfs.exposure == exposure].copy() if not etfs.empty else pd.DataFrame()
+
+action = str(signal.get("model_action", "WATCH"))
+tone = ACTION_CLASS.get(action, "slate")
+tone = tone if tone in {"buy", "red", "blue", "grey"} else ""
+shares = signal.get("shares_index_with")
+value_type = str(signal.get("value_type", "") or "")
+source_bits = [source_label(signal.get("data_source"))]
+if value_type:
+    source_bits.append(f"{value_type} series")
+source_bits.append(str(signal.get("resolved_official_index_name", "")))
+
+section("Model decision")
+st.markdown(
+    f'<div class="hero hero-{tone or "grey"}"><div class="hero-top">'
+    f'<span class="hero-act">{_esc(action)}</span>'
+    f'<span class="pill pill-slate">{_esc(signal.get("stage", "—"))}</span>'
+    f'<span class="pill pill-grey">Rank {int(signal["rank"]) if signal["rank"] == signal["rank"] else "—"}</span>'
+    f'</div><div class="hero-why">{_esc(signal.get("analysis_note", ""))}</div>'
+    f'<div class="hero-src">{_esc(" · ".join(b for b in source_bits if b))}</div></div>',
+    unsafe_allow_html=True,
+)
+
+if shares:
+    note(
+        f"This exposure resolves to the same underlying index as <b>{_esc(str(shares))}</b>. "
+        "They will always move together — holding both is one bet, not two.",
+        tone="amber",
+    )
+
+kpi_strip(
+    [
+        ("Momentum Z", fmt_num(signal.get("momentum_z")), "cross-sectional", ""),
+        ("RS ratio", fmt_num(signal.get("rs_ratio"), 3), "1.00 = Nifty 50", ""),
+        ("RS velocity", fmt_num(signal.get("rs_momentum"), 1), "13-week change", ""),
+        ("12M return", fmt_pct(signal.get("return_12M")), "index level", ""),
+    ]
+)
+kpi_strip(
+    [
+        ("1M", fmt_pct(signal.get("return_1M")), "", ""),
+        ("3M", fmt_pct(signal.get("return_3M")), "", ""),
+        ("6M", fmt_pct(signal.get("return_6M")), "", ""),
+        ("12M", fmt_pct(signal.get("return_12M")), "", ""),
+    ]
+)
+
+exposure_id = str(signal.get("exposure_id", ""))
+if exposure_id in getattr(rs, "columns", []):
+    section("Relative strength", "Mansfield RS against Nifty 50 · 52-week baseline")
+    st.plotly_chart(rs_trajectory(rs, exposure_id), width="stretch", config=CHART_CONFIG)
+
+section("Implementation vehicle")
+if selected.empty:
+    note(
+        "No listed ETF or fund is currently mapped to this exposure. The index signal stands, but "
+        "there is no direct instrument in the universe to express it."
+    )
+else:
+    st.dataframe(
+        clean_table(
+            selected,
+            [
+                ("symbol", "Symbol"),
+                ("name", "Fund"),
+                ("yfinance_symbol", "Yahoo symbol"),
+                ("aum_crore", "AUM (₹ cr)"),
+                ("expense_ratio", "Expense"),
+                ("liquidity_score", "Liquidity"),
+                ("tracking_error", "Tracking error"),
+            ],
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+    if selected[["aum_crore", "expense_ratio", "liquidity_score", "tracking_error"]].isna().all().all():
+        st.caption(
+            "AUM, expense ratio, liquidity and tracking error are not published in the prepared "
+            "dataset for these funds and are left blank rather than invented. Check them on the "
+            "AMC factsheet before you trade."
+        )
+
+    symbols = [s for s in selected["symbol"].dropna().tolist() if s in etf_prices.columns]
+    if symbols:
+        section("Fund performance", "Rebased to ₹100 over the window every fund shares")
+        figure, window = etf_comparison(etf_prices, symbols)
+        if window:
+            st.caption(
+                f"{window}. Comparing funds over their own full histories would make the "
+                "longest-listed one look strongest purely because it started earlier."
+            )
+        st.plotly_chart(figure, width="stretch", config=CHART_CONFIG)
+
+        for symbol in symbols:
+            with st.expander(f"Drawdown and raw series · {symbol}", expanded=False):
+                st.plotly_chart(
+                    drawdown_chart(etf_prices[symbol]), width="stretch",
+                    config=CHART_CONFIG, key=f"dd_{symbol}",
+                )
+                st.plotly_chart(
+                    price_chart(etf_prices[symbol], symbol), width="stretch",
+                    config=CHART_CONFIG, key=f"px_{symbol}",
+                )
+    missing = [s for s in selected["symbol"].dropna().tolist() if s not in etf_prices.columns]
+    if missing:
+        st.caption(f"No price history ingested for: {', '.join(missing)}.")
