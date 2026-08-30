@@ -26,4 +26,26 @@ jobs:
       - name: Run tests
         run: pytest -q
       - name: Run canonical backtest parameter matrix
-        run: python scripts/backtest_parameter_matrix.py
+        id: matrix
+        continue-on-error: true
+        run: |
+          python scripts/backtest_parameter_matrix.py \
+            --output diagnostic_summary.csv \
+            --decisions-output diagnostic_decisions.csv \
+            > diagnostic_matrix.log 2>&1
+          status=$?
+          cat diagnostic_matrix.log
+          exit $status
+      - name: Upload diagnostic outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-parameter-diagnostic
+          path: |
+            diagnostic_matrix.log
+            diagnostic_summary.csv
+            diagnostic_decisions.csv
+          if-no-files-found: warn
+      - name: Fail if diagnostic matrix failed
+        if: steps.matrix.outcome == 'failure'
+        run: exit 1
