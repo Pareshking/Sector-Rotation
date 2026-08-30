@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,17 @@ from src.quantitative.relative_strength import (
 )
 from src.universe.registry import UniverseRegistry
 from src.universe.validation import validate_universe
+
+# jugaad-data's own HTTP layer (NSEHistory._get / NSEIndexHistory._get) issues
+# requests with no read timeout at all. Under concurrent fan-out across ~150
+# vehicles, a single stalled NSE response hangs that thread forever, and
+# ThreadPoolExecutor.__exit__ (and the interpreter itself, via its own
+# non-daemon worker threads) then waits for it indefinitely — turning one slow
+# response into a run that consumes the entire CI timeout with nothing to show
+# for it. This is the process-wide safety net: any socket opened without an
+# explicit timeout (which covers every jugaad-data call) inherits this one.
+# Calls that already pass their own timeout (MFAPI, AMFI, Yahoo) are unaffected.
+socket.setdefaulttimeout(30)
 
 ROOT = Path(__file__).resolve().parents[1]
 UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
