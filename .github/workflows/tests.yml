@@ -29,7 +29,7 @@ jobs:
         id: matrix
         continue-on-error: true
         run: |
-          python scripts/backtest_parameter_matrix.py \
+          PYTHONPATH=. python scripts/backtest_parameter_matrix.py \
             --output diagnostic_summary.csv \
             --decisions-output diagnostic_decisions.csv \
             > diagnostic_matrix.log 2>&1
