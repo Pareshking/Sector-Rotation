@@ -362,25 +362,32 @@ def stage_legend() -> None:
 
 def brand_header(
     name: str,
-    stats: Sequence[tuple[str, str, str]] = (),
+    regime: str = "",
+    stats: Sequence[tuple[str, str]] = (),
     when: str = "",
 ) -> None:
-    """Identity bar: product name, traffic-light dots, and headline state.
+    """Identity bar: product name, traffic-light dots, and market context.
 
-    stats: (label, value, tone) where tone is ''|'buy'|'red'|'amber'|'blue'.
+    Deliberately market state rather than app state — how many BUY signals the
+    board holds is on the board; what a reader wants at the top is whether the
+    tide is going in or out.
     """
     dots = (
         '<div class="brand-dots"><i style="background:#FF5F57"></i>'
         '<i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>'
     )
-    tones = {"buy": "var(--buy)", "red": "var(--red)", "amber": "var(--amber)", "blue": "var(--blue)"}
     chips = []
-    for label, value, tone in stats:
-        colour = tones.get(tone, "var(--ink2)")
+    if regime:
+        colour = "var(--buy)" if regime.upper().startswith("BULL") else "var(--red)"
         chips.append(
-            '<span class="brand-sep">|</span>'
-            f'<span class="brand-stat">{_esc(label)} '
-            f'<b style="color:{colour}">{_esc(value)}</b></span>'
+            f'<span class="brand-sep">|</span><span class="brand-stat">'
+            f'<i class="dot" style="background:{colour}"></i>'
+            f'<b style="color:{colour};letter-spacing:.06em">{_esc(regime)}</b></span>'
+        )
+    for label, value in stats:
+        chips.append(
+            f'<span class="brand-sep">|</span><span class="brand-stat">{_esc(label)} '
+            f'<b>{_esc(value)}</b></span>'
         )
     when_html = f'<span class="brand-when">{_esc(when)}</span>' if when else ""
     st.markdown(

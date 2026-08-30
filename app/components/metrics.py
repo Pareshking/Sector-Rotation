@@ -290,3 +290,34 @@ def action_counts(frame: pd.DataFrame) -> dict[str, int]:
         "improving": int((action == "WATCH / IMPROVING").sum()),
         "watch": int((action == "WATCH").sum()),
     }
+
+
+def market_state(panel: pd.DataFrame, benchmark: pd.Series, decisions: pd.DataFrame) -> dict[str, object]:
+    """Headline market context: regime, benchmark level, and breadth.
+
+    Regime is the benchmark against its own 200-day average — the crudest
+    honest read of whether the tide is going in or out. Breadth is how much of
+    the universe is actually leading, which is what decides whether a rotation
+    model has anything to rotate into.
+    """
+    state: dict[str, object] = {}
+    series = pd.to_numeric(benchmark, errors="coerce").dropna() if benchmark is not None else pd.Series(dtype=float)
+    if not series.empty:
+        last = float(series.iloc[-1])
+        state["level"] = last
+        state["as_of"] = series.index[-1]
+        if len(series) >= 200:
+            average = float(series.tail(200).mean())
+            if average > 0:
+                gap = last / average - 1.0
+                state["vs_200d"] = gap
+                state["regime"] = "BULLISH" if gap >= 0 else "BEARISH"
+    if decisions is not None and not decisions.empty and "stage" in decisions.columns:
+        eligible = decisions[decisions.get("decision_eligible", True)]
+        leading = int((eligible["stage"] == "Leading").sum())
+        state["leading"] = leading
+        state["universe"] = int(len(eligible))
+        if len(eligible):
+            state["breadth"] = leading / len(eligible)
+    del panel
+    return state
