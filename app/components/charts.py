@@ -386,3 +386,41 @@ def monthly_excess(monthly: pd.DataFrame, height: int = 240) -> go.Figure:
         bargap=0.35,
     )
     return _finish(fig, height)
+
+
+def rolling_excess(windows: pd.DataFrame, height: int = 280) -> go.Figure:
+    """Every overlapping window's excess return, in time order.
+
+    One headline number depends on when the test started and stopped; this shows
+    how often the strategy was actually ahead.
+    """
+    fig = go.Figure()
+    if windows is None or windows.empty:
+        return _finish(fig, height)
+    excess = windows["excess"].astype(float)
+    fig.add_trace(
+        go.Bar(
+            x=pd.to_datetime(windows["end"]), y=excess,
+            marker=dict(color=["#047857" if v > 0 else "#BE123C" for v in excess], line=dict(width=0)),
+            customdata=windows[["strategy", "benchmark", "cash_periods"]].to_numpy(),
+            hovertemplate=(
+                "12 months to <b>%{x|%b %Y}</b><br>Strategy %{customdata[0]:.1%}"
+                "<br>Nifty 50 %{customdata[1]:.1%}<br><b>Excess %{y:+.1%}</b>"
+                "<br>Cash in %{customdata[2]:.0%} of periods<extra></extra>"
+            ),
+            showlegend=False,
+        )
+    )
+    fig.add_hline(y=0, line_color="#94A3B8", line_width=1)
+    median = float(excess.median())
+    fig.add_hline(y=median, line_dash="dot", line_color="#4338CA", line_width=1.4)
+    fig.add_annotation(
+        x=1, y=median, xref="paper", xanchor="right", yanchor="bottom", showarrow=False,
+        text=f"median {median:+.1%}", font=dict(size=10, color="#4338CA"),
+    )
+    fig.update_layout(
+        yaxis_title="Excess over the 12 months ending",
+        yaxis=dict(tickformat=".0%", title_font=dict(size=11, color=MUTED)),
+        bargap=0.25,
+    )
+    return _finish(fig, height)

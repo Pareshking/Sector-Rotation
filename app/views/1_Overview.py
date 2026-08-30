@@ -10,9 +10,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.charts import CHART_CONFIG, stage_distribution
-from app.components.metrics import action_counts, data_health_banner
+from app.components.metrics import action_counts, data_health_banner, health_summary
 from app.components.tables import BASES, BASIS_RELATIVE, action_board, audit_frame, ranked_table
 from app.components.theme import (
+    mobile_nav,
+    brand_header,
     inject_theme,
     kpi_strip,
     note,
@@ -23,6 +25,21 @@ from app.components.theme import (
 from app.data import load_decisions, load_rs
 
 inject_theme()
+mobile_nav("Overview")
+
+_summary = load_decisions()
+_counts = action_counts(_summary) if not _summary.empty else {}
+_health = health_summary()
+brand_header(
+    "Dual Momentum",
+    stats=[
+        ("BUY", str(_counts.get("buy", "—")), "buy"),
+        ("EXIT", str(_counts.get("reduce", "—")), "red"),
+        ("Watch", str(_counts.get("watch", "—") + _counts.get("improving", 0)), "blue"),
+        ("Universe", f"{_counts.get('eligible', '—')}/{_counts.get('total', '—')}", ""),
+    ],
+    when=f"Updated {_health.get('age', '')}" if _health else "",
+)
 page_header(
     "India Sector Rotation",
     "Decision Dashboard",
@@ -31,7 +48,7 @@ page_header(
 )
 data_health_banner()
 
-decisions = load_decisions()
+decisions = _summary
 if decisions.empty:
     st.warning("Prepared data is not available yet. Run the data pipeline first.")
     st.stop()

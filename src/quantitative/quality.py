@@ -12,6 +12,7 @@ comparison is meaningful, and against the data itself where it is not.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -21,6 +22,11 @@ FLATLINE_DAYS = 15
 # Trading days of slack before the newest observation counts as stale. NSE
 # holidays and long weekends routinely account for three or four.
 STALE_DAYS = 5
+
+# A GitHub Actions timeout reports as "cancelled", which looks identical to a
+# run superseded by concurrency. Two nights of failed publishing went unnoticed
+# because nothing checked the consequence: how old the published data is.
+MAX_DATA_AGE_HOURS = 36
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
 
@@ -126,6 +132,28 @@ def _observation_drop(report: QualityReport, new: dict, previous: dict) -> None:
         )
 
 
+def _publication_age(report: QualityReport, new: dict) -> None:
+    """Catch a silent publishing failure by its symptom, not its cause."""
+    stamp = new.get("last_updated_utc")
+    if not stamp:
+        return
+    try:
+        published = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    hours = (datetime.now(timezone.utc) - published).total_seconds() / 3600.0
+    if hours > MAX_DATA_AGE_HOURS:
+        report.add(
+            "error",
+            "stale_publication",
+            f"Published dataset is {hours:.0f} hours old, past the {MAX_DATA_AGE_HOURS}-hour "
+            "limit. The scheduled refresh is not completing — check whether the pipeline job "
+            "timed out (Actions reports a timeout as 'cancelled', not 'failed').",
+        )
+
+
 def check_dataset(
     new_metadata: dict,
     previous_metadata: dict | None,
@@ -142,6 +170,7 @@ def check_dataset(
     else:
         report.add("info", "baseline", "No previous metadata found; skipped regression checks.")
 
+    _publication_age(report, new_metadata)
     _staleness(report, index_prices)
     _flatlines(report, index_prices, "canonical index histories", "error")
     _flatlines(report, etf_prices, "ETF price histories", "warning")

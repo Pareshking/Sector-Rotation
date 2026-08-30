@@ -42,6 +42,7 @@ Streamlit UI (read-only)
 | **Backtest** | Would following this ranking have beaten Nifty 50 over the last 1–5 years? |
 | **Exposure** | For one exposure: the decision, the relative-strength path, and the funds that implement it. |
 | **Data Health** | Where every series came from, what it actually is, and what is missing. |
+| **Method** | The complete theory in one page: ranking, stages, decision rule, backtest, provenance. |
 
 Every page is read-only. The app performs no downloads at page load; it reads prepared files
 from `data/processed/`.
@@ -258,13 +259,26 @@ NSE publishes 139 live indices; the rotation universe is 47. A candidate must cl
   assumed, which understates the filtered variant rather than flattering it.
 - Minimum window is 12 months; 24, 36 and 60 are also selectable.
 
-**Universe modes.** The backtest can run three ways, and the difference is large:
+**Rolling windows.** A single headline number depends entirely on when the test started and
+stopped. Every overlapping 12-month window inside the record is compounded separately, and the
+distribution is the honest answer — the same treatment the Durability panel gives an exposure,
+applied to the strategy itself. Over 37 windows:
 
-| Mode | 60-month result | Excess vs Nifty 50 |
+| | Beat Nifty 50 | Median excess | Worst window |
+| --- | --- | --- | --- |
+| All indices | 100% | +34.4% | +3.0% |
+| Buyable + entry rule | **35%** | **−4.7%** | −20.1% |
+
+How often it worked matters more than how much it made in the one window that happens to end
+today.
+
+**Universe modes.** The backtest can run three ways, each stricter than the last:
+
+| Mode | What it measures | 60-month excess |
 | --- | --- | --- |
-| Full universe | +279.7% | **+237.3%** |
-| Investable only | +68.6% | +26.2% |
-| Investable + BUY signal | +43.6% | **+1.1%** |
+| **All indices** | The signal — does momentum pick strong sectors? | **+237.3%** |
+| **Buyable only** | The portfolio — could you have owned it? | +26.2% |
+| **Buyable + entry rule** | What the app would have told you to do | **+1.1%** |
 
 Full universe ranks all 47 indices including ones with no buyable vehicle: it measures the
 *signal*, not a portfolio anyone could have held. Investable restricts each pick to exposures
@@ -274,7 +288,11 @@ launched in 2024–25, so treating them as available in 2021 would be look-ahead
 kind. Adding the BUY gate also demands the live entry rule. Where the top-ranked name fails a
 test the next is taken, down to a configurable rank (default 3); past that the slot goes to cash.
 
-Nearly all the apparent edge is in the gap between those rows. Read the investable numbers.
+Nearly all the apparent edge is in the gap between those rows. Read the last one.
+
+The universe can also be restricted to **sectors** or **themes** alone. They rotate on different
+cycles, and the combined universe is not the average of the two — over 60 months sectors alone
+returned −21.0% excess and themes −4.1%, against +1.1% for both together. Breadth itself helps.
 
 **Holding period** is selectable (1, 2, 3 or 6 months) and is separate from the history window.
 
@@ -347,6 +365,11 @@ it replaces — ETF coverage moved 31 → 29 between two production runs and not
 `--strict` to exit non-zero on any error-level alert; the Data Health page shows them either
 way.
 
+A run also fails the check when the **published dataset is more than 36 hours old**. A GitHub
+Actions timeout reports as "cancelled", which looks identical to a run superseded by concurrency,
+so two nights of failed publishing once passed unnoticed. Checking the symptom — how old the data
+is — catches that regardless of the cause.
+
 `source_counts` is derived from the sources that actually resolved. It previously used a
 hard-coded key list that omitted the adapter serving every exposure, so Data Health reported
 zero canonical sources while 43 were present.
@@ -355,6 +378,15 @@ ETF coverage moves run to run as Yahoo and MFAPI availability changes; INFRABEES
 standing gap, now resolves via MFAPI. Any shortfall here is an ingestion gap in the
 implementation layer only — the canonical index history behind every decision is unaffected, and
 no signal depends on it. The Data Health page lists whatever is currently skipped.
+
+## Alerts
+
+A rotation model only asks for action when something changes, so watching the board daily is the
+wrong use of a person. After each pipeline run `tools/detect_alerts.py` compares the new decision
+set against the last committed one and reports exposures entering or leaving BUY / REDUCE. The
+workflow opens a GitHub issue when anything changed, which reaches watchers by email and on
+mobile without needing any additional secret. Drift between two WATCH states is recorded but
+never raised — only entering or leaving an actionable state interrupts anyone.
 
 ## Local setup
 

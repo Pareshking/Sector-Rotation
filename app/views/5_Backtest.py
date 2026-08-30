@@ -10,11 +10,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import CHART_CONFIG, equity_curve, monthly_excess
-from app.components.theme import fmt_pct, inject_theme, kpi_strip, note, page_header, section
+from app.components.charts import CHART_CONFIG, equity_curve, monthly_excess, rolling_excess
+from app.components.theme import mobile_nav, fmt_pct, inject_theme, kpi_strip, note, page_header, section
 from app.data import load_backtest, load_decisions, load_index_panel, load_sensitivity
 
 inject_theme()
+mobile_nav("Backtest")
 page_header(
     "Out of Sample",
     "Backtest",
@@ -34,21 +35,32 @@ if panel.empty or benchmark.empty:
     st.stop()
 
 section("Strategy")
+# Three questions, asked in order. Naming them by the question keeps them apart:
+# "investable" vs "investable + BUY" said nothing about what each one measures.
 MODES = {
-    "Full universe": (False, False),
-    "Investable only": (True, False),
-    "Investable + BUY signal": (True, True),
+    "All indices": (False, False),
+    "Buyable only": (True, False),
+    "Buyable + entry rule": (True, True),
 }
 mode = st.segmented_control(
     "Universe",
     list(MODES),
-    default="Investable + BUY signal",
+    default="Buyable + entry rule",
     key="bt_mode",
-    help="Full universe ranks all 47 indices, including ones with no buyable vehicle. "
-    "Investable restricts each pick to exposures that had a fund you could actually have "
-    "bought on that date. Adding the BUY signal also demands the live entry rule.",
 )
-investable_only, require_buy = MODES.get(mode or "Investable + BUY signal", (True, True))
+note(
+    "<b>All indices</b> — ranks all 47 indices and buys the top ones, whether or not a fund "
+    "existed. It measures <i>the signal</i>: does momentum pick strong sectors?<br>"
+    "<b>Buyable only</b> — same ranking, but a pick must have had a real ETF or index fund "
+    "trading on that date. It measures <i>the portfolio</i>: could you have owned it?<br>"
+    "<b>Buyable + entry rule</b> — and the exposure must also satisfy the live BUY rule "
+    "(Leading, RS ratio above 1, positive RS velocity). It measures <i>what this app would "
+    "actually have told you to do</i>.<br>"
+    "Each step is stricter than the last, so the return falls at each one. The gap between the "
+    "first and the last is the part of the headline result you could never have captured."
+)
+
+investable_only, require_buy = MODES.get(mode or "Buyable + entry rule", (True, True))
 
 controls = st.columns(3)
 top_n = controls[0].segmented_control(
@@ -66,13 +78,18 @@ months = controls[2].segmented_control(
     "fewer months of actual returns.",
 )
 
-extra = st.columns(2)
-max_rank_depth = extra[0].segmented_control(
+extra = st.columns(3)
+category = extra[0].segmented_control(
+    "Which universe", ["All", "Sectors", "Themes"], default="All", key="bt_category",
+    help="Sectors and themes rotate on different cycles, so they can be tested apart. "
+    "Note that the combined universe is not the average of the two — breadth itself helps.",
+)
+max_rank_depth = extra[1].segmented_control(
     "Substitute down to rank", [2, 3, 5], default=3, key="bt_depth",
     help="When the top-ranked exposure cannot be bought, how far down the ranking to look "
     "before the slot goes to cash instead.",
 )
-absolute_filter = extra[1].toggle(
+absolute_filter = extra[2].toggle(
     "Absolute momentum filter (dual momentum)", value=True, key="bt_abs",
     help="Only hold an exposure whose own 12-month return is positive; otherwise that slot "
          "sits in cash at 0%.",
@@ -86,6 +103,7 @@ result = load_backtest(
     investable_only=investable_only,
     require_buy=require_buy,
     max_rank_depth=max_rank_depth or 3,
+    category=category or "All",
 )
 if not result.ok:
     note(f"<b>Backtest unavailable.</b> {result.error}", tone="amber")
@@ -190,7 +208,7 @@ if investable_only and cash_periods > 0:
     )
 if not investable_only:
     note(
-        "<b>Full universe includes exposures with no buyable vehicle.</b> It measures the signal, "
+        "<b>All indices includes exposures with no buyable vehicle.</b> It measures the signal, "
         "not a portfolio you could have held. Switch to <i>Investable only</i> for what was "
         "actually purchasable on each date.",
         tone="amber",
@@ -201,6 +219,42 @@ st.plotly_chart(equity_curve(result.equity), width="stretch", config=CHART_CONFI
 
 section("Monthly excess return", "Green months beat Nifty 50; hover for the holdings")
 st.plotly_chart(monthly_excess(_named(result.monthly)), width="stretch", config=CHART_CONFIG)
+
+section("Every 12-month window", "One number depends on when the test started; this does not")
+from src.quantitative.backtest import rolling_summary_stats, rolling_windows
+
+windows = rolling_windows(result, window=max(12 // max(hold_months or 1, 1), 2))
+roll = rolling_summary_stats(windows)
+if roll:
+    kpi_strip(
+        [
+            (
+                "Beat Nifty 50",
+                f"{roll['beat_rate']:.0%}",
+                f"of {int(roll['windows'])} rolling windows",
+                "buy" if roll["beat_rate"] >= 0.5 else "red",
+            ),
+            ("Made money", f"{roll['positive_rate']:.0%}", "windows with a positive return", ""),
+            (
+                "Median excess",
+                fmt_pct(roll["median_excess"]),
+                "typical window vs Nifty 50",
+                "buy" if roll["median_excess"] > 0 else "red",
+            ),
+            ("Worst window", fmt_pct(roll["worst_excess"]), "largest shortfall", "amber"),
+        ]
+    )
+    st.plotly_chart(rolling_excess(windows), width="stretch", config=CHART_CONFIG)
+    note(
+        f"A single headline figure is one draw. Across <b>{int(roll['windows'])}</b> overlapping "
+        f"windows the strategy was ahead of Nifty 50 in <b>{roll['beat_rate']:.0%}</b> of them, "
+        f"with a median excess of <b>{fmt_pct(roll['median_excess'])}</b> and a worst window of "
+        f"<b>{fmt_pct(roll['worst_excess'])}</b>. How often it worked matters more than how much "
+        "it made in the one window that happens to end today.",
+        tone="" if roll["beat_rate"] >= 0.5 else "amber",
+    )
+else:
+    note("Not enough completed periods yet to form a rolling window.")
 
 section("Early versus recent", "The blended figure hides which half it came from")
 from src.quantitative.backtest import period_split
@@ -257,6 +311,7 @@ sensitivity = load_sensitivity(
     top_n=top_n or 2, months=months or 60, hold_months=hold_months or 1,
     absolute_filter=absolute_filter, investable_only=investable_only,
     require_buy=require_buy, max_rank_depth=max_rank_depth or 3,
+    category=category or "All",
 )
 if sensitivity.empty:
     note("Not enough history to test alternative weightings.")

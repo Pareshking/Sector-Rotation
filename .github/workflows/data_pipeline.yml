@@ -37,6 +37,29 @@ jobs:
         env:
           PIPELINE_MODE: live
         run: python -m pipeline.run_pipeline --mode live
+      - name: Detect decision changes
+        id: alerts
+        continue-on-error: true
+        run: |
+          python tools/detect_alerts.py --out alerts.md
+          if [ -s alerts.md ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Notify on decision changes
+        if: steps.alerts.outputs.changed == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A GitHub issue is the notification channel that needs no extra
+          # secret: watchers get it by email and on mobile for free.
+          TITLE="Signal change — $(date -u +'%d %b %Y')"
+          {
+            cat alerts.md
+            echo
+            echo "[Open the dashboard](https://dualmomentum.streamlit.app)"
+          } > body.md
+          gh issue create --title "$TITLE" --body-file body.md --label signal 2>/dev/null             || gh issue create --title "$TITLE" --body-file body.md
+
       - name: Commit generated data
         run: |
           git config user.name "github-actions[bot]"

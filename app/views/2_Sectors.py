@@ -13,10 +13,11 @@ if str(ROOT) not in sys.path:
 from app.components.charts import CHART_CONFIG, momentum_bar, returns_heatmap
 from app.components.metrics import action_counts
 from app.components.tables import BASES, BASIS_RELATIVE, ranked_table, signal_rows
-from app.components.theme import inject_theme, kpi_strip, note, page_header, section, stage_legend
+from app.components.theme import mobile_nav, inject_theme, kpi_strip, note, page_header, section, stage_legend
 from app.data import load_decisions, load_rs
 
 inject_theme()
+mobile_nav("Sectors")
 page_header(
     "Exposure Universe",
     "Sectors",

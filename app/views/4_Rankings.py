@@ -11,10 +11,11 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, returns_heatmap
 from app.components.tables import BASES, BASIS_RELATIVE, audit_frame, ranked_table
-from app.components.theme import inject_theme, kpi_strip, note, page_header, section
+from app.components.theme import mobile_nav, inject_theme, kpi_strip, note, page_header, section
 from app.data import load_decisions, load_rs
 
 inject_theme()
+mobile_nav("Rankings")
 page_header(
     "Quantitative Ranking",
     "Screener",

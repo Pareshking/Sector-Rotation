@@ -400,3 +400,50 @@ def weight_sensitivity(
             }
         )
     return pd.DataFrame(rows)
+
+
+def rolling_windows(result: BacktestResult, window: int = 12) -> pd.DataFrame:
+    """Compound every overlapping ``window``-period stretch of the record.
+
+    One 48-month number depends entirely on when the test started and stopped.
+    The distribution of every 12-month window inside it says how often the
+    strategy actually worked — the same treatment the Durability panel gives an
+    exposure, applied to the strategy itself.
+    """
+    if not result.ok or len(result.monthly) < window:
+        return pd.DataFrame()
+    frame = result.monthly.reset_index(drop=True)
+    rows = []
+    for start in range(len(frame) - window + 1):
+        chunk = frame.iloc[start:start + window]
+        strategy = float((1 + chunk["strategy_return"]).prod() - 1)
+        bench = float((1 + chunk["benchmark_return"]).prod() - 1)
+        rows.append(
+            {
+                "start": pd.to_datetime(chunk["rebalance"].iloc[0]),
+                "end": pd.to_datetime(chunk["period_end"].iloc[-1]),
+                "strategy": strategy,
+                "benchmark": bench,
+                "excess": strategy - bench,
+                "cash_periods": float((chunk["cash_slots"] > 0).mean()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def rolling_summary_stats(windows: pd.DataFrame) -> dict[str, float]:
+    """Distribution of the rolling windows: how often, not just how much."""
+    if windows is None or windows.empty:
+        return {}
+    excess = windows["excess"].astype(float)
+    strategy = windows["strategy"].astype(float)
+    return {
+        "windows": float(len(windows)),
+        "beat_rate": float((excess > 0).mean()),
+        "positive_rate": float((strategy > 0).mean()),
+        "median_excess": float(excess.median()),
+        "best_excess": float(excess.max()),
+        "worst_excess": float(excess.min()),
+        "median_strategy": float(strategy.median()),
+        "worst_strategy": float(strategy.min()),
+    }

@@ -91,6 +91,25 @@ def vehicles_by_exposure() -> dict[str, list[str]]:
     }
 
 
+@st.cache_data(show_spinner=False)
+def exposure_categories() -> dict[str, str]:
+    """exposure_id -> 'sector' or 'thematic'."""
+    summary = load_summary()
+    if summary.empty or "category" not in summary.columns:
+        return {}
+    return {str(k): str(v) for k, v in zip(summary["exposure_id"], summary["category"])}
+
+
+def _restrict(panel: pd.DataFrame, category: str) -> pd.DataFrame:
+    """Sectors and themes rotate differently, so they can be tested apart."""
+    if category in ("", "All", None):
+        return panel
+    wanted = {"Sectors": "sector", "Themes": "thematic"}.get(category, category)
+    lookup = exposure_categories()
+    keep = [c for c in panel.columns if lookup.get(str(c)) == wanted]
+    return panel[keep] if keep else panel.iloc[:, :0]
+
+
 @st.cache_data(show_spinner="Running the backtest…")
 def _backtest(
     top_n: int,
@@ -100,12 +119,14 @@ def _backtest(
     investable_only: bool,
     require_buy: bool,
     max_rank_depth: int,
+    category: str,
     modified_ns: int = 0,
 ):
     del modified_ns
     from src.quantitative.backtest import run_backtest
 
     panel, benchmark = load_index_panel()
+    panel = _restrict(panel, category)
     return run_backtest(
         panel,
         benchmark,
@@ -129,47 +150,25 @@ def load_backtest(
     investable_only: bool = False,
     require_buy: bool = False,
     max_rank_depth: int = 3,
+    category: str = "All",
 ):
     stamp = _mtime("index_prices.parquet") + _mtime("etf_prices.parquet") + _mtime("etf_universe.parquet")
     return _backtest(
         top_n, months, hold_months, absolute_filter,
-        investable_only, require_buy, max_rank_depth, stamp,
+        investable_only, require_buy, max_rank_depth, category, stamp,
     )
 
 
 @st.cache_data(show_spinner=False)
 def _tradeable_ids(modified_ns: int = 0) -> set[str]:
     del modified_ns
-    etfs = load_etfs()
-    if etfs.empty or "exposure_id" not in etfs.columns:
-        return set()
-    # NSE's own listed-ETF feed reporting turnover is stronger evidence that an
-    # instrument can be bought than whether our pipeline happened to ingest its
-    # NAV history — MFAPI outages routinely leave a live, liquid ETF with no
-    # series on disk.
-    # An open-ended index fund transacts at NAV with no exchange listing, so it
-    # is investable even though NSE reports no turnover for it.
-    is_fund = etfs.get("vehicle", pd.Series("etf", index=etfs.index)).eq("index_fund")
-    if "traded_value" in etfs.columns:
-        traded = pd.to_numeric(etfs["traded_value"], errors="coerce").fillna(0) > 0
-        investable = traded | is_fund
-        if investable.any():
-            return set(etfs.loc[investable, "exposure_id"].dropna().astype(str))
-    if is_fund.any():
-        return set(etfs.loc[is_fund, "exposure_id"].dropna().astype(str))
-    prices = load_etf_prices()
-    if prices.empty:
-        return set()
-    keyed = etfs.assign(key=etfs["symbol"].fillna(etfs["name"]))
-    with_history = keyed[keyed["key"].isin(prices.columns)]
-    return set(with_history["exposure_id"].dropna().astype(str))
+    from src.universe.tradeability import investable_exposure_ids
+
+    return investable_exposure_ids(load_etfs(), load_etf_prices())
 
 
 def tradeable_exposure_ids() -> set[str]:
-    """Exposures with a listed ETF that actually trades.
-
-    A BUY on an exposure with no instrument is research, not a trade.
-    """
+    """Exposures with a listed ETF that trades, or an open-ended index fund."""
     return _tradeable_ids(_mtime("etf_universe.parquet") + _mtime("etf_prices.parquet"))
 
 
@@ -225,12 +224,14 @@ WEIGHT_SCHEMES: dict[str, dict[str, float]] = {
 @st.cache_data(show_spinner="Testing every weighting…")
 def _sensitivity(
     top_n: int, months: int, hold_months: int, absolute_filter: bool,
-    investable_only: bool, require_buy: bool, max_rank_depth: int, modified_ns: int = 0,
+    investable_only: bool, require_buy: bool, max_rank_depth: int,
+    category: str = "All", modified_ns: int = 0,
 ):
     del modified_ns
     from src.quantitative.backtest import weight_sensitivity
 
     panel, benchmark = load_index_panel()
+    panel = _restrict(panel, category)
     if panel.empty:
         return pd.DataFrame()
     return weight_sensitivity(
@@ -246,10 +247,11 @@ def _sensitivity(
 def load_sensitivity(
     top_n: int = 2, months: int = 60, hold_months: int = 1, absolute_filter: bool = True,
     investable_only: bool = True, require_buy: bool = True, max_rank_depth: int = 3,
+    category: str = "All",
 ):
     """How much the result depends on the weighting rather than the strategy."""
     stamp = _mtime("index_prices.parquet") + _mtime("etf_prices.parquet")
     return _sensitivity(
         top_n, months, hold_months, absolute_filter,
-        investable_only, require_buy, max_rank_depth, stamp,
+        investable_only, require_buy, max_rank_depth, category, stamp,
     )

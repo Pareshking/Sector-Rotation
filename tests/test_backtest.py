@@ -261,3 +261,29 @@ def test_weight_sensitivity_reports_one_row_per_scheme():
     grid = weight_sensitivity(prices, benchmark, schemes, months=12, absolute_filter=False)
     assert list(grid["weighting"]) == ["equal", "short"]
     assert {"total_return", "excess", "max_drawdown", "turnover"} <= set(grid.columns)
+
+
+def test_rolling_windows_cover_every_overlapping_stretch():
+    prices, benchmark = _panel(days=1300)
+    result = run_backtest(prices, benchmark, months=36, absolute_filter=False)
+    from src.quantitative.backtest import rolling_summary_stats, rolling_windows
+
+    windows = rolling_windows(result, window=12)
+    assert len(windows) == len(result.monthly) - 12 + 1
+    assert (windows["end"] > windows["start"]).all()
+    for row in windows.itertuples():
+        assert abs(row.excess - (row.strategy - row.benchmark)) < 1e-12
+
+    stats = rolling_summary_stats(windows)
+    assert stats["windows"] == len(windows)
+    assert 0.0 <= stats["beat_rate"] <= 1.0
+    assert stats["worst_excess"] <= stats["median_excess"] <= stats["best_excess"]
+
+
+def test_rolling_windows_are_empty_when_the_record_is_too_short():
+    prices, benchmark = _panel()
+    result = run_backtest(prices, benchmark, months=12, absolute_filter=False)
+    from src.quantitative.backtest import rolling_summary_stats, rolling_windows
+
+    assert rolling_windows(result, window=24).empty
+    assert rolling_summary_stats(rolling_windows(result, window=24)) == {}

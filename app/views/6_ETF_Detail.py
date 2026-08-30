@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 from app.components.charts import CHART_CONFIG, drawdown_chart, etf_comparison, price_chart, rs_trajectory
 from app.components.metrics import source_label
 from app.components.theme import (
+    mobile_nav,
     ACTION_CLASS,
     _esc,
     fmt_num,
@@ -26,6 +27,7 @@ from app.components.theme import (
 from app.data import load_decisions, load_etf_prices, load_etfs, load_rs, vehicle_tracking
 
 inject_theme()
+mobile_nav("ETF_Detail")
 page_header(
     "Implementation",
     "Exposure Detail",

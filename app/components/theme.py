@@ -154,6 +154,41 @@ background:var(--bg2);padding:14px 16px;box-shadow:var(--shadow)}
 .legend{display:flex!important;flex-wrap:wrap;gap:5px 18px;font-size:.72rem;color:var(--muted);margin:.2rem 0 .5rem}
 .legend span{display:inline-flex!important;align-items:center;gap:6px;white-space:nowrap}
 
+
+/* ---------- brand header ---------- */
+.brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);
+border-radius:var(--r);background:var(--bg);padding:10px 14px;box-shadow:var(--shadow);margin:.1rem 0 .5rem}
+.brand-dots{display:flex;gap:6px;flex:none}
+.brand-dots i{width:11px;height:11px;border-radius:50%;display:block}
+.brand-name{font-weight:800;font-size:1.02rem;letter-spacing:-.02em;white-space:nowrap}
+.brand-sep{color:var(--line2);flex:none}
+.brand-stat{display:flex;align-items:center;gap:6px;font-size:.755rem;color:var(--ink2);white-space:nowrap;
+font-variant-numeric:tabular-nums}
+.brand-stat b{font-weight:750}
+.brand-when{margin-left:auto;color:var(--muted);font-size:.72rem;white-space:nowrap}
+@media(max-width:760px){
+.brand{padding:9px 11px;gap:8px 10px}
+.brand-name{font-size:.94rem}
+.brand-when{margin-left:0;width:100%}
+}
+
+/* ---------- mobile navigation ----------
+   Below its breakpoint Streamlit does not render the top nav at all — it swaps
+   to a sidebar, putting every page behind an unlabelled chevron on the device
+   this app is most used on. CSS cannot bring back elements that were never
+   rendered, so we ship our own horizontal bar and hide the chevron. */
+.mnav{display:none}
+@media(max-width:768px){
+[data-testid="stSidebarCollapsedControl"],[data-testid="stExpandSidebarButton"]{display:none!important}
+.mnav{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+padding:2px 0 8px;margin:0 -.6rem .2rem;padding-left:.6rem;padding-right:.6rem}
+.mnav::-webkit-scrollbar{display:none}
+.mnav a{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:999px;
+border:1px solid var(--line);background:var(--bg2);color:var(--ink2);text-decoration:none;
+font-size:.775rem;font-weight:600;white-space:nowrap}
+.mnav a.on{background:var(--brand-bg);border-color:#C7D2FE;color:var(--brand)}
+}
+
 /* ---------- notes / callouts ---------- */
 .note{border:1px solid var(--line);background:var(--bg2);border-radius:10px;padding:10px 12px;font-size:.765rem;line-height:1.5;color:var(--ink2)}
 .note-amber{border-color:var(--amber-line);background:var(--amber-bg);color:#78350F}
@@ -174,7 +209,7 @@ background:var(--bg2);padding:14px 16px;box-shadow:var(--shadow)}
 div[data-baseweb="select"]>div{border-radius:9px;border-color:var(--line2)}
 
 @media(max-width:760px){
-[data-testid="stMainBlockContainer"]{padding-left:.6rem;padding-right:.6rem;padding-top:.15rem}
+[data-testid="stMainBlockContainer"]{padding-left:.6rem;padding-right:.6rem;padding-top:66px}
 h1{font-size:1.44rem!important}
 .sr-sub{font-size:.8rem}
 .kpis{grid-template-columns:1fr 1fr;gap:8px}
@@ -323,3 +358,59 @@ def stage_legend() -> None:
         if stage != "Insufficient Data"
     )
     st.markdown(f'<div class="legend">{items}</div>', unsafe_allow_html=True)
+
+
+def brand_header(
+    name: str,
+    stats: Sequence[tuple[str, str, str]] = (),
+    when: str = "",
+) -> None:
+    """Identity bar: product name, traffic-light dots, and headline state.
+
+    stats: (label, value, tone) where tone is ''|'buy'|'red'|'amber'|'blue'.
+    """
+    dots = (
+        '<div class="brand-dots"><i style="background:#FF5F57"></i>'
+        '<i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>'
+    )
+    tones = {"buy": "var(--buy)", "red": "var(--red)", "amber": "var(--amber)", "blue": "var(--blue)"}
+    chips = []
+    for label, value, tone in stats:
+        colour = tones.get(tone, "var(--ink2)")
+        chips.append(
+            '<span class="brand-sep">|</span>'
+            f'<span class="brand-stat">{_esc(label)} '
+            f'<b style="color:{colour}">{_esc(value)}</b></span>'
+        )
+    when_html = f'<span class="brand-when">{_esc(when)}</span>' if when else ""
+    st.markdown(
+        f'<div class="brand">{dots}<span class="brand-name">{_esc(name)}</span>'
+        f'{"".join(chips)}{when_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
+    ("Dashboard", "Overview", "📊"),
+    ("Sectors", "Sectors", "🏭"),
+    ("Themes", "Themes", "🧭"),
+    ("Screener", "Rankings", "🔎"),
+    ("Backtest", "Backtest", "📈"),
+    ("Exposure", "ETF_Detail", "💹"),
+    ("Data Health", "System_Health", "🛡️"),
+    ("Method", "Method", "📘"),
+)
+
+
+def mobile_nav(active: str = "") -> None:
+    """Horizontal, scrollable page bar for narrow screens.
+
+    Streamlit hides its own top navigation below ~768px, so without this every
+    page sits two taps deep behind a chevron on a phone.
+    """
+    links = "".join(
+        f'<a class="{"on" if path == active else ""}" href="/{path}" target="_self">'
+        f'{icon} {_esc(label)}</a>'
+        for label, path, icon in NAV_ITEMS
+    )
+    st.markdown(f'<nav class="mnav">{links}</nav>', unsafe_allow_html=True)

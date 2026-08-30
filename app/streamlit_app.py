@@ -29,6 +29,7 @@ pages = [
     st.Page(VIEWS_DIR / "5_Backtest.py", title="Backtest", icon="📈", url_path="Backtest"),
     st.Page(VIEWS_DIR / "6_ETF_Detail.py", title="Exposure", icon="💹", url_path="ETF_Detail"),
     st.Page(VIEWS_DIR / "7_System_Health.py", title="Data Health", icon="🛡️", url_path="System_Health"),
+    st.Page(VIEWS_DIR / "8_Method.py", title="Method", icon="📘", url_path="Method"),
 ]
 
 st.navigation(pages, position="top", expanded=False).run()

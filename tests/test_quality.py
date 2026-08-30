@@ -62,3 +62,28 @@ def test_first_run_without_history_skips_regression_checks():
     report = check_dataset({"valid_canonical_series": 47}, None, _prices())
     assert report.ok
     assert any(a["check"] == "baseline" for a in report.alerts)
+
+
+def test_stale_publication_is_an_error():
+    """A timeout reports as 'cancelled' in Actions, so catch the symptom instead."""
+    import datetime as dt
+
+    from src.quantitative.quality import MAX_DATA_AGE_HOURS
+
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=MAX_DATA_AGE_HOURS + 6)).isoformat()
+    report = check_dataset({"last_updated_utc": old}, {}, _prices())
+    assert not report.ok
+    assert any(a["check"] == "stale_publication" for a in report.errors)
+
+
+def test_fresh_publication_passes():
+    import datetime as dt
+
+    fresh = dt.datetime.now(dt.timezone.utc).isoformat()
+    report = check_dataset({"last_updated_utc": fresh}, {}, _prices())
+    assert not any(a["check"] == "stale_publication" for a in report.alerts)
+
+
+def test_unparseable_timestamp_does_not_crash_the_check():
+    report = check_dataset({"last_updated_utc": "not a date"}, {}, _prices())
+    assert report.ok

@@ -17,10 +17,11 @@ from app.components.metrics import (
     lineage_frame,
     source_label,
 )
-from app.components.theme import inject_theme, kpi_strip, note, page_header, section
+from app.components.theme import mobile_nav, inject_theme, kpi_strip, note, page_header, section
 from app.data import load_decisions, load_index_panel
 
 inject_theme()
+mobile_nav("System_Health")
 page_header(
     "Trust & Lineage",
     "Data Health",
