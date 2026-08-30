@@ -45,6 +45,17 @@ kpi_strip(
     ]
 )
 
+alerts = metadata.get("quality_alerts", []) or []
+actionable = [a for a in alerts if a.get("severity") in {"error", "warning"}]
+if actionable:
+    section("Quality alerts", "Regressions against the previous published run")
+    for alert in actionable:
+        text = f"**{alert.get('check', 'check')}** — {alert.get('message', '')}"
+        (st.error if alert.get("severity") == "error" else st.warning)(text)
+elif alerts:
+    section("Quality alerts")
+    st.success("No data-quality regressions detected against the previous run.")
+
 section("Provenance")
 note(
     "Canonical index histories are retrieved from <b>NSE / NiftyIndices</b> through the "

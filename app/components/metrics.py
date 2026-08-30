@@ -271,6 +271,7 @@ def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
     frame.loc[frame["model_action"].eq("WATCH / IMPROVING"), "watch_kind"] = "Early turn"
 
     frame["shares_index_with"] = _shared_index_map(frame)
+    frame["tradeable"] = False
     frame["analysis_note"] = [
         _analysis_note(row, str(row["model_action"])) for row in frame.to_dict("records")
     ]

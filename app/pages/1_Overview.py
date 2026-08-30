@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, stage_distribution
 from app.components.metrics import action_counts, data_health_banner
-from app.components.tables import action_board, ranked_table
+from app.components.tables import BASES, BASIS_RELATIVE, action_board, ranked_table
 from app.components.theme import (
     inject_theme,
     kpi_strip,
@@ -52,8 +52,16 @@ kpi_strip(
         ("Reduce / exit", counts["reduce"], "exit rule triggered", "red"),
     ]
 )
+buyable = int(buy["tradeable"].sum()) if "tradeable" in buy.columns else len(buy)
+if len(buy) and buyable < len(buy):
+    note(
+        f"<b>{len(buy) - buyable} of {len(buy)} BUY signals have no listed ETF that trades.</b> "
+        "They are research, not positions. Use the tradeable filter below to see only what you "
+        "can actually put money into.",
+        tone="amber",
+    )
 
-section("Universe breadth", "Where the 43 exposures sit in the rotation cycle")
+section("Universe breadth", f"Where the {len(eligible)} decision-grade exposures sit in the rotation cycle")
 stage_legend()
 st.plotly_chart(stage_distribution(eligible), width="stretch", config=CHART_CONFIG)
 
@@ -84,9 +92,27 @@ period = st.segmented_control(
     key="overview_lookback",
     help="Composite is the cross-sectional Z-score blended across all four horizons.",
 )
-only_grade = st.toggle("Decision-grade only", value=True, key="overview_grade")
+basis = st.segmented_control(
+    "Measure",
+    BASES,
+    default=BASIS_RELATIVE,
+    key="overview_basis",
+    help="Relative strength is the model's own measure: exposure return minus Nifty 50 over the "
+    "same window. Absolute is what a holder actually earned.",
+)
+controls = st.columns(2)
+only_grade = controls[0].toggle("Decision-grade only", value=True, key="overview_grade")
+only_tradeable = controls[1].toggle(
+    "Tradeable only", value=False, key="overview_tradeable",
+    help="Keep only exposures with a listed ETF that traded at the last NSE snapshot.",
+)
 table_frame = eligible if only_grade else decisions
-ranked_table(table_frame, rs=rs, sort_by=period or "Composite", key="overview_table")
+if only_tradeable and "tradeable" in table_frame.columns:
+    table_frame = table_frame[table_frame.tradeable]
+ranked_table(
+    table_frame, rs=rs, sort_by=period or "Composite",
+    basis=basis or BASIS_RELATIVE, key="overview_table",
+)
 
 section("How a decision is reached")
 note(

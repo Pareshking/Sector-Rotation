@@ -117,6 +117,10 @@ being read as sector strength.
 For lookback `L`: `R_L = P_t / P_{t-L} - 1`, and relative momentum against Nifty 50 is
 `DM_L = R_exposure,L - R_benchmark,L`.
 
+Rankings default to the **relative** measure. In a rising market almost everything is up, so
+ranking on absolute return largely re-ranks the market itself; `vs Nifty 50` is what the model
+is actually about. Absolute stays one click away because it is what a holder earns.
+
 ### Mansfield Relative Strength
 
 `RS_t = P_exposure,t / P_benchmark,t`, resampled to Friday observations, then
@@ -155,6 +159,26 @@ representing a single bet. `NBFC` and `Financial Services ex Bank` both pointed 
 `NIFTY MIDSMALL FINANCIAL SERVICES` and renamed **Mid & Small Financials** to describe what that
 index actually is. The UI still carries a `shares_index_with` flag as a backstop for any dataset
 generated before the rule existed.
+
+### Tradeability
+
+An exposure with a BUY and no instrument is research, not a position. The dashboard says so:
+signals with no listed ETF carry a `no ETF` badge, and a **Tradeable only** filter on the
+Dashboard and Screener keeps just the ones you can act on.
+
+ETF mappings are built from two authoritative sources and nothing else. NSE's listed-ETF feed
+supplies the trading symbol and the index each symbol tracks; AMFI's scheme master supplies the
+fund name and scheme code. A fund is only mapped when, after stripping the AMC name, its index
+tokens match the exposure's benchmark **exactly** — a subset match is how `Groww BSE Power ETF`
+becomes Nifty Power, or `ICICI Nifty Financial Services Ex-Bank ETF` becomes Nifty Services
+Sector. Anything without an authoritative fund name is left unmapped rather than given an
+invented one.
+
+Each pipeline run also takes a point-in-time NSE snapshot per symbol: turnover, last price, NAV
+and the resulting premium or discount. AUM, expense ratio and tracking error are not published
+on any endpoint this project reads and stay null. Turnover and premium are the two that most
+often decide whether a signal is actionable — a thin sector ETF at a 2% premium hands back a
+chunk of the index's edge on entry.
 
 ### Choosing a new exposure
 
@@ -202,7 +226,7 @@ from luck; treat it as a sanity check on the signal, not as evidence of an edge.
 | `index_prices.parquet` | Daily canonical index levels per exposure plus the Nifty 50 benchmark in `__benchmark__` — required by the Backtest page |
 | `etf_universe.parquet` | ETF metadata per exposure |
 | `etf_prices.parquet` | Daily ETF price/NAV history |
-| `metadata.json` | Coverage, provenance, value types, validation warnings |
+| `metadata.json` | Coverage, provenance, value types, validation warnings, quality alerts |
 
 If `index_prices.parquet` is absent the Backtest page explains what is missing and the rest of
 the app is unaffected.
@@ -211,6 +235,13 @@ the app is unaffected.
 
 `metadata.json` records the UTC update timestamp, canonical coverage, per-exposure source and
 value type, resolved index names, ETF coverage and skipped symbols, and validation warnings.
+
+Each run compares itself against the previous published `metadata.json` before overwriting it
+and records `quality_alerts`: coverage regressions, dropped series, truncated histories, stale
+data, and flatlined series. A run that is internally consistent can still be worse than the one
+it replaces — ETF coverage moved 31 → 29 between two production runs and nothing said so. Pass
+`--strict` to exit non-zero on any error-level alert; the Data Health page shows them either
+way.
 
 `source_counts` is derived from the sources that actually resolved. It previously used a
 hard-coded key list that omitted the adapter serving every exposure, so Data Health reported

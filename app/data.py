@@ -49,7 +49,10 @@ def _decisions(modified_ns: int = 0) -> pd.DataFrame:
     summary = load_summary()
     if summary.empty:
         return summary
-    return decision_frame(summary).sort_values("rank", ignore_index=True)
+    frame = decision_frame(summary).sort_values("rank", ignore_index=True)
+    if "exposure_id" in frame.columns:
+        frame["tradeable"] = frame["exposure_id"].astype(str).isin(tradeable_exposure_ids())
+    return frame
 
 
 def load_decisions() -> pd.DataFrame:
@@ -89,3 +92,50 @@ def _backtest(top_n: int, months: int, absolute_filter: bool, modified_ns: int =
 
 def load_backtest(top_n: int = 2, months: int = 12, absolute_filter: bool = True):
     return _backtest(top_n, months, absolute_filter, _mtime("index_prices.parquet"))
+
+
+@st.cache_data(show_spinner=False)
+def _tradeable_ids(modified_ns: int = 0) -> set[str]:
+    del modified_ns
+    etfs = load_etfs()
+    if etfs.empty or "exposure_id" not in etfs.columns:
+        return set()
+    # NSE's own listed-ETF feed reporting turnover is stronger evidence that an
+    # instrument can be bought than whether our pipeline happened to ingest its
+    # NAV history — MFAPI outages routinely leave a live, liquid ETF with no
+    # series on disk.
+    if "traded_value" in etfs.columns:
+        traded = pd.to_numeric(etfs["traded_value"], errors="coerce").fillna(0) > 0
+        if traded.any():
+            return set(etfs.loc[traded, "exposure_id"].dropna().astype(str))
+    prices = load_etf_prices()
+    if prices.empty:
+        return set()
+    keyed = etfs.assign(key=etfs["symbol"].fillna(etfs["name"]))
+    with_history = keyed[keyed["key"].isin(prices.columns)]
+    return set(with_history["exposure_id"].dropna().astype(str))
+
+
+def tradeable_exposure_ids() -> set[str]:
+    """Exposures with a listed ETF that actually trades.
+
+    A BUY on an exposure with no instrument is research, not a trade.
+    """
+    return _tradeable_ids(_mtime("etf_universe.parquet") + _mtime("etf_prices.parquet"))
+
+
+@st.cache_data(show_spinner=False)
+def _liquidity(modified_ns: int = 0) -> pd.DataFrame:
+    del modified_ns
+    etfs = load_etfs()
+    if etfs.empty or "traded_value" not in etfs.columns:
+        return pd.DataFrame()
+    frame = etfs.copy()
+    frame["traded_value"] = pd.to_numeric(frame["traded_value"], errors="coerce")
+    best = frame.sort_values("traded_value", ascending=False).groupby("exposure_id", as_index=False).first()
+    return best[["exposure_id", "symbol", "traded_value", "premium_discount_pct"]]
+
+
+def exposure_liquidity() -> pd.DataFrame:
+    """Most-traded ETF per exposure, with its premium or discount to NAV."""
+    return _liquidity(_mtime("etf_universe.parquet"))

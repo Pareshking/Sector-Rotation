@@ -64,3 +64,29 @@ def test_exposures_sharing_one_index_are_flagged_not_deduplicated():
     assert out.loc["NBFC", "shares_index_with"] == "Financial ex Bank"
     assert out.loc["Financial ex Bank", "shares_index_with"] == "NBFC"
     assert out.loc["Pharma", "shares_index_with"] is None
+
+
+def test_ranking_defaults_to_return_relative_to_the_benchmark():
+    """A relative-strength model must rank on relative return, not raw return.
+
+    In a rising market ranking on absolute return largely re-ranks the market.
+    """
+    from app.components.tables import BASIS_ABSOLUTE, BASIS_RELATIVE, _column_for
+
+    assert _column_for("3M", BASIS_RELATIVE) == "relative_3M"
+    assert _column_for("3M", BASIS_ABSOLUTE) == "return_3M"
+    assert _column_for("Composite", BASIS_RELATIVE) == "momentum_z"
+    assert _column_for("Composite", BASIS_ABSOLUTE) == "momentum_z"
+
+
+def test_relative_ranking_reorders_versus_absolute():
+    from app.components.tables import BASIS_ABSOLUTE, BASIS_RELATIVE, _column_for
+
+    frame = pd.DataFrame([
+        {"exposure": "Beta chaser", "return_3M": 0.20, "relative_3M": 0.01},
+        {"exposure": "True leader", "return_3M": 0.12, "relative_3M": 0.09},
+    ])
+    by_abs = frame.sort_values(_column_for("3M", BASIS_ABSOLUTE), ascending=False)
+    by_rel = frame.sort_values(_column_for("3M", BASIS_RELATIVE), ascending=False)
+    assert by_abs.exposure.iat[0] == "Beta chaser"
+    assert by_rel.exposure.iat[0] == "True leader"

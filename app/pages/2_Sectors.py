@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, momentum_bar, returns_heatmap
 from app.components.metrics import action_counts
-from app.components.tables import ranked_table, signal_rows
+from app.components.tables import BASES, BASIS_RELATIVE, ranked_table, signal_rows
 from app.components.theme import inject_theme, kpi_strip, note, page_header, section, stage_legend
 from app.data import load_decisions, load_rs
 
@@ -65,7 +65,18 @@ period = st.segmented_control(
     default="Composite",
     key="sectors_lookback",
 )
-ranked_table(eligible, rs=rs, sort_by=period or "Composite", key="sectors_table")
+basis = st.segmented_control(
+    "Measure",
+    BASES,
+    default=BASIS_RELATIVE,
+    key="sectors_basis",
+    help="Relative strength is the model's own measure: exposure return minus Nifty 50 over the "
+    "same window. Absolute is what a holder actually earned.",
+)
+ranked_table(
+    eligible, rs=rs, sort_by=period or "Composite",
+    basis=basis or BASIS_RELATIVE, key="sectors_table",
+)
 
 unavailable = frame[~frame.decision_eligible]
 if not unavailable.empty:

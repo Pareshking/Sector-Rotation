@@ -10,6 +10,8 @@ import pandas as pd
 from src.data.cache import write_parquet
 from src.data.etf_data import fetch_etf_histories
 from src.data.index_data import download_benchmark, download_canonical_indices
+from src.data.nse_etf import fetch_etf_snapshot, merge_snapshot
+from src.quantitative.quality import check_dataset
 from src.quantitative.ranking import rank_exposures
 from src.quantitative.relative_strength import (
     mansfield_relative_strength,
@@ -225,7 +227,7 @@ def build_live(registry, skip_etf: bool = False):
     return prices, benchmark, _etf_frame(registry), etf_history, health
 
 
-def run(mode, skip_etf: bool = False):
+def run(mode, skip_etf: bool = False, strict: bool = False):
     registry = UniverseRegistry.from_json(UNIVERSE_PATH)
     report = validate_universe(registry.all())
     if not report.valid:
@@ -292,6 +294,10 @@ def run(mode, skip_etf: bool = False):
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")
     write_parquet(pd.DataFrame(rs_series).sort_index(), OUTPUT / "rs_matrix.parquet")
+    # Liquidity and premium/discount decide whether a signal is actually
+    # actionable. Best-effort: a snapshot failure must not fail a run that
+    # already produced valid index history.
+    etfs = merge_snapshot(etfs, fetch_etf_snapshot() if mode == "live" else None)
     write_parquet(etfs, OUTPUT / "etf_universe.parquet")
     write_parquet(etf_history, OUTPUT / "etf_prices.parquet")
 
@@ -316,8 +322,26 @@ def run(mode, skip_etf: bool = False):
         "validation_warnings": list(report.warnings),
         **health,
     }
-    (OUTPUT / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    # Compare against the last published run before overwriting it. A run that
+    # is internally consistent can still be worse than the one it replaces.
+    previous_path = OUTPUT / "metadata.json"
+    previous = {}
+    if previous_path.exists():
+        try:
+            previous = json.loads(previous_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            previous = {}
+    quality = check_dataset(metadata, previous, index_panel, etf_history)
+    metadata["quality_alerts"] = quality.sorted_alerts()
+
+    previous_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    for alert in quality.sorted_alerts():
+        print(f"[{alert['severity'].upper()}] {alert['check']}: {alert['message']}")
     print(json.dumps(metadata))
+    if strict and not quality.ok:
+        raise SystemExit(
+            f"Data-quality check failed with {len(quality.errors)} error(s); dataset written but not clean."
+        )
 
 
 if __name__ == "__main__":
@@ -328,5 +352,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Refresh index data only, reusing the ETF artifacts already in data/processed.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero when a data-quality check reports an error.",
+    )
     args = parser.parse_args()
-    run(args.mode, skip_etf=args.skip_etf)
+    run(args.mode, skip_etf=args.skip_etf, strict=args.strict)

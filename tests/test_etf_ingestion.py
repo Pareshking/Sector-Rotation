@@ -66,3 +66,41 @@ def test_scheme_without_complete_mfapi_can_fall_back_to_yahoo(monkeypatch):
 
     assert "B22" in frame
     assert sources["B22"] == "yahoo"
+
+
+def test_snapshot_merge_matches_on_nse_symbol():
+    import pandas as pd
+
+    from src.data.nse_etf import merge_snapshot
+
+    etfs = pd.DataFrame([{"exposure_id": "auto", "symbol": "AUTOBEES"},
+                         {"exposure_id": "bank", "symbol": "BANKBEES"}])
+    snapshot = pd.DataFrame([{"symbol": "AUTOBEES", "traded_value": 5.0, "traded_quantity": 1.0,
+                              "last_price": 100.0, "nav": 99.0, "premium_discount_pct": 1.01,
+                              "week52_high": 1.0, "week52_low": 1.0, "snapshot_utc": "x"}])
+    merged = merge_snapshot(etfs, snapshot)
+    assert float(merged.loc[merged.symbol == "AUTOBEES", "traded_value"].iat[0]) == 5.0
+    assert pd.isna(merged.loc[merged.symbol == "BANKBEES", "traded_value"].iat[0])
+
+
+def test_snapshot_failure_never_breaks_the_universe():
+    """A decorative live feed must not be able to fail a valid pipeline run."""
+    import pandas as pd
+
+    from src.data.nse_etf import merge_snapshot
+
+    etfs = pd.DataFrame([{"exposure_id": "auto", "symbol": "AUTOBEES"}])
+    merged = merge_snapshot(etfs, pd.DataFrame())
+    assert len(merged) == 1
+    assert "traded_value" in merged.columns
+    assert merged["traded_value"].isna().all()
+
+
+def test_premium_is_computed_from_price_over_nav():
+    import pandas as pd
+
+    from src.data.nse_etf import _number
+
+    assert _number("1,234.50") == 1234.5
+    assert pd.isna(_number("-"))
+    assert pd.isna(_number(None))

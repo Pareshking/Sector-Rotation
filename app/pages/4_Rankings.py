@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.charts import CHART_CONFIG, returns_heatmap
-from app.components.tables import ranked_table
+from app.components.tables import BASES, BASIS_RELATIVE, ranked_table
 from app.components.theme import inject_theme, kpi_strip, note, page_header, section
 from app.data import load_decisions, load_rs
 
@@ -50,7 +50,20 @@ period = row2[1].segmented_control(
     key="screener_lookback",
     help="Composite blends the cross-sectional Z-scores of all four horizons.",
 )
+row3 = st.columns([1.3, 1.4, 1.1])
+basis = row3[0].segmented_control(
+    "Measure",
+    BASES,
+    default=BASIS_RELATIVE,
+    key="screener_basis",
+    help="Relative strength is the model's own measure: exposure return minus Nifty 50 over the "
+    "same window. Absolute is what a holder actually earned.",
+)
 only_grade = row2[2].toggle("Decision-grade only", value=True, key="screener_grade")
+only_tradeable = row3[2].toggle(
+    "Tradeable only", value=False, key="screener_tradeable",
+    help="Keep only exposures with a listed ETF that traded at the last NSE snapshot.",
+)
 
 frame = decisions[decisions.category.isin(picked_categories)]
 if picked_actions:
@@ -59,6 +72,8 @@ if picked_stages:
     frame = frame[frame.stage.isin(picked_stages)]
 if only_grade:
     frame = frame[frame.decision_eligible]
+if only_tradeable and "tradeable" in frame.columns:
+    frame = frame[frame.tradeable]
 if search.strip():
     frame = frame[frame.exposure.str.contains(search.strip(), case=False, na=False)]
 
@@ -77,6 +92,12 @@ kpi_strip(
             "red",
         ),
         (
+            "Tradeable",
+            int(frame.tradeable.sum()) if "tradeable" in frame else "—",
+            "have a listed ETF",
+            "",
+        ),
+        (
             "Median 3M",
             f"{frame.return_3M.median() * 100:.1f}%" if "return_3M" in frame else "—",
             "selection median",
@@ -85,8 +106,12 @@ kpi_strip(
     ]
 )
 
-section("Ranked universe", f"{len(frame)} exposures · sorted by {period or 'Composite'}")
-ranked_table(frame, rs=rs, sort_by=period or "Composite", height=620, key="screener_table")
+measure = "composite momentum" if (period or "Composite") == "Composite" else f"{period} {basis or BASIS_RELATIVE}"
+section("Ranked universe", f"{len(frame)} exposures · sorted by {measure}")
+ranked_table(
+    frame, rs=rs, sort_by=period or "Composite",
+    basis=basis or BASIS_RELATIVE, height=620, key="screener_table",
+)
 
 st.download_button(
     "Download this selection (CSV)",

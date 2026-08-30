@@ -77,7 +77,26 @@
       "category": "sector",
       "benchmark": "Nifty Chemicals",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "CHEMICAL",
+          "name": "Kotak Nifty Chemicals ETF",
+          "scheme_code": 153934,
+          "yfinance_symbol": "CHEMICAL.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "GROWWCHEM",
+          "name": "Groww Nifty Chemicals ETF",
+          "scheme_code": 154111,
+          "yfinance_symbol": "GROWWCHEM.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "consumer-durables",
@@ -124,7 +143,17 @@
       "category": "sector",
       "benchmark": "NIFTY FINANCIAL SERVICES EX-BANK",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "FINIETF",
+          "name": "ICICI Prudential Nifty Financial Services Ex-Bank ETF",
+          "scheme_code": 150879,
+          "yfinance_symbol": "FINIETF.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "fmcg",
@@ -261,7 +290,17 @@
       "category": "sector",
       "benchmark": "Nifty OIL & GAS",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "OILIETF",
+          "name": "ICICI Prudential Nifty Oil & Gas ETF",
+          "scheme_code": 152748,
+          "yfinance_symbol": "OILIETF.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "pharma",
@@ -293,7 +332,62 @@
       "category": "sector",
       "benchmark": "Nifty Private Bank",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "HDFCPVTBAN",
+          "name": "HDFC NIFTY Private Bank ETF",
+          "scheme_code": 150802,
+          "yfinance_symbol": "HDFCPVTBAN.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "NPBET",
+          "name": "Kotak Nifty Private Bank ETF",
+          "scheme_code": 154491,
+          "yfinance_symbol": "NPBET.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "PVTBANIETF",
+          "name": "ICICI Prudential Nifty Private Bank ETF",
+          "scheme_code": 147530,
+          "yfinance_symbol": "PVTBANIETF.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "PVTBANKADD",
+          "name": "DSP Nifty Private Bank ETF",
+          "scheme_code": 151887,
+          "yfinance_symbol": "PVTBANKADD.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "PVTBKGROWW",
+          "name": "Groww Nifty Private Bank ETF",
+          "scheme_code": 154345,
+          "yfinance_symbol": "PVTBKGROWW.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "SBIETFPB",
+          "name": "SBI Nifty Private Bank ETF",
+          "scheme_code": 148541,
+          "yfinance_symbol": "SBIETFPB.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "psu-bank",
@@ -317,7 +411,17 @@
       "category": "sector",
       "benchmark": "Nifty Realty",
       "yfinance_symbol": "^CNXREALTY",
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "MOREALTY",
+          "name": "Motilal Oswal Nifty Realty ETF",
+          "scheme_code": 152541,
+          "yfinance_symbol": "MOREALTY.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "telecom",
@@ -407,7 +511,17 @@
       "category": "thematic",
       "benchmark": "Nifty India Infrastructure & Logistics",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "INFRA",
+          "name": "Mirae Asset Nifty India Infrastructure & Logistics ETF",
+          "scheme_code": 154181,
+          "yfinance_symbol": "INFRA.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "railways",
@@ -415,7 +529,17 @@
       "category": "thematic",
       "benchmark": "Nifty India Railways PSU",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "GROWWRAIL",
+          "name": "Groww Nifty India Railways PSU ETF",
+          "scheme_code": 153229,
+          "yfinance_symbol": "GROWWRAIL.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "consumption",
@@ -481,7 +605,26 @@
       "category": "thematic",
       "benchmark": "Nifty Energy",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "ENERGY",
+          "name": "Mirae Asset Nifty Energy ETF",
+          "scheme_code": 153945,
+          "yfinance_symbol": "ENERGY.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        },
+        {
+          "symbol": "MOENERGY",
+          "name": "Motilal Oswal Nifty Energy ETF",
+          "scheme_code": 153931,
+          "yfinance_symbol": "MOENERGY.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "commodities",
@@ -489,7 +632,17 @@
       "category": "thematic",
       "benchmark": "Nifty Commodities",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "COMMOIETF",
+          "name": "ICICI Prudential Nifty Commodities ETF",
+          "scheme_code": 151207,
+          "yfinance_symbol": "COMMOIETF.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "capital-markets",
@@ -497,7 +650,17 @@
       "category": "thematic",
       "benchmark": "Nifty Capital Markets",
       "yfinance_symbol": null,
-      "etfs": []
+      "etfs": [
+        {
+          "symbol": "GROWWCAPM",
+          "name": "Groww Nifty Capital Markets ETF",
+          "scheme_code": 153907,
+          "yfinance_symbol": "GROWWCAPM.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {}
+        }
+      ]
     },
     {
       "id": "mnc",

@@ -12,7 +12,6 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, drawdown_chart, etf_comparison, price_chart, rs_trajectory
 from app.components.metrics import source_label
-from app.components.tables import clean_table
 from app.components.theme import (
     ACTION_CLASS,
     _esc,
@@ -107,28 +106,49 @@ if selected.empty:
         "there is no direct instrument in the universe to express it."
     )
 else:
+    vehicles = selected.sort_values("traded_value", ascending=False) if "traded_value" in selected else selected
     st.dataframe(
-        clean_table(
-            selected,
-            [
-                ("symbol", "Symbol"),
-                ("name", "Fund"),
-                ("yfinance_symbol", "Yahoo symbol"),
-                ("aum_crore", "AUM (₹ cr)"),
-                ("expense_ratio", "Expense"),
-                ("liquidity_score", "Liquidity"),
-                ("tracking_error", "Tracking error"),
-            ],
-        ),
+        vehicles,
         hide_index=True,
         width="stretch",
+        column_order=[
+            c for c in ["symbol", "name", "traded_value", "premium_discount_pct",
+                        "last_price", "nav", "expense_ratio", "tracking_error"]
+            if c in vehicles.columns
+        ],
+        column_config={
+            "symbol": st.column_config.TextColumn("Symbol", width="small", pinned=True),
+            "name": st.column_config.TextColumn("Fund", width="large"),
+            "traded_value": st.column_config.NumberColumn(
+                "Turnover ₹", format="compact", width="small",
+                help="Value traded on NSE at the last pipeline snapshot. Thin turnover means a "
+                     "wide spread, whatever the signal says.",
+            ),
+            "premium_discount_pct": st.column_config.NumberColumn(
+                "Prem/disc %", format="%+.2f", width="small",
+                help="Last price against NAV. A persistent premium is a permanent cost on entry.",
+            ),
+            "last_price": st.column_config.NumberColumn("Price", format="%.2f", width="small"),
+            "nav": st.column_config.NumberColumn("NAV", format="%.2f", width="small"),
+            "expense_ratio": st.column_config.NumberColumn("Expense", format="%.2f", width="small"),
+            "tracking_error": st.column_config.NumberColumn("Tracking err", format="%.2f", width="small"),
+        },
     )
-    if selected[["aum_crore", "expense_ratio", "liquidity_score", "tracking_error"]].isna().all().all():
-        st.caption(
-            "AUM, expense ratio, liquidity and tracking error are not published in the prepared "
-            "dataset for these funds and are left blank rather than invented. Check them on the "
-            "AMC factsheet before you trade."
-        )
+    if "premium_discount_pct" in vehicles.columns:
+        rich = vehicles[pd.to_numeric(vehicles["premium_discount_pct"], errors="coerce") > 1.0]
+        if not rich.empty:
+            note(
+                "<b>Trading above NAV.</b> "
+                + ", ".join(f"{r.symbol} +{r.premium_discount_pct:.2f}%" for r in rich.itertuples())
+                + ". Buying at a premium hands back part of the signal's edge on day one.",
+                tone="amber",
+            )
+    st.caption(
+        "Turnover, price, NAV and premium are a point-in-time NSE snapshot taken when the pipeline "
+        "last ran, not a history. AUM, expense ratio and tracking error are not published on any "
+        "endpoint this project reads, so they stay blank rather than invented — check the AMC "
+        "factsheet before you trade."
+    )
 
     symbols = [s for s in selected["symbol"].dropna().tolist() if s in etf_prices.columns]
     if symbols:
