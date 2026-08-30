@@ -100,3 +100,34 @@ def merge_snapshot(etfs: pd.DataFrame, snapshot: pd.DataFrame) -> pd.DataFrame:
     for column in COLUMNS[1:]:
         merged[column] = symbols.map(lookup[column])
     return merged
+
+
+# A retail book is small enough that raw turnover is the wrong lens. What
+# matters is whether one position clears without moving the price, and the
+# convention is that a day's participation should stay a small share of volume.
+DEFAULT_BOOK_RUPEES = 3_000_000
+DEFAULT_POSITION_SHARE = 0.5      # top-2 rotation puts half the book in one name
+PARTICIPATION_LIMIT = 0.10        # take at most 10% of a day's turnover
+
+
+def position_headroom(
+    traded_value: float,
+    book: float = DEFAULT_BOOK_RUPEES,
+    position_share: float = DEFAULT_POSITION_SHARE,
+    participation: float = PARTICIPATION_LIMIT,
+) -> dict[str, float]:
+    """How many trading days one position would take to build at a sane pace.
+
+    Returns days_to_build and the share of a day's turnover a single position
+    represents. For most sector ETFs a retail-sized position clears in one day,
+    which is precisely the edge a small book has over a large one.
+    """
+    position = book * position_share
+    if not traded_value or traded_value != traded_value or traded_value <= 0:
+        return {"position": position, "days_to_build": float("inf"), "day_share": float("inf")}
+    capacity = traded_value * participation
+    return {
+        "position": position,
+        "days_to_build": position / capacity,
+        "day_share": position / traded_value,
+    }

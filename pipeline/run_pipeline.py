@@ -11,6 +11,7 @@ from src.data.cache import write_parquet
 from src.data.etf_data import fetch_etf_histories
 from src.data.index_data import download_benchmark, download_canonical_indices
 from src.data.nse_etf import fetch_etf_snapshot, merge_snapshot
+from src.quantitative.analytics import analyse_exposure
 from src.quantitative.quality import check_dataset
 from src.quantitative.ranking import rank_exposures
 from src.quantitative.relative_strength import (
@@ -228,6 +229,36 @@ def build_live(registry, skip_etf: bool = False):
     return prices, benchmark, _etf_frame(registry), etf_history, health
 
 
+def _analytics_columns(asset, benchmark) -> dict[str, float]:
+    """Durability metrics, precomputed so the UI stays cheap.
+
+    A rank says which exposure is strongest today. These say whether that
+    strength has held up, and whether it is strength or just beta.
+    """
+    stats = analyse_exposure(asset, benchmark)
+    risk = stats.risk.get("3Y", {})
+    rolling = stats.rolling.get("3Y", {})
+    consistency = stats.consistency.get("1Y", {})
+    return {
+        "alpha": stats.versus.get("alpha"),
+        "beta": stats.versus.get("beta"),
+        "r_squared": stats.versus.get("r2"),
+        "information_ratio": stats.versus.get("information_ratio"),
+        "tracking_error": stats.versus.get("error"),
+        "volatility_3y": risk.get("volatility"),
+        "sharpe_3y": risk.get("sharpe"),
+        "sortino_3y": risk.get("sortino"),
+        "rolling_3y_median": rolling.get("median"),
+        "rolling_3y_min": rolling.get("min"),
+        "rolling_3y_positive": rolling.get("positive"),
+        "consistency_overall": consistency.get("overall"),
+        "consistency_upside": consistency.get("upside"),
+        "consistency_downside": consistency.get("downside"),
+        "max_drawdown": stats.drawdown.get("depth"),
+        "drawdown_from_high": stats.drawdown.get("current"),
+    }
+
+
 def run(mode, skip_etf: bool = False, strict: bool = False):
     registry = UniverseRegistry.from_json(UNIVERSE_PATH)
     report = validate_universe(registry.all())
@@ -288,6 +319,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
                     f"relative_{label}": rank_row[f"relative_{label}"]
                     for label in ("1M", "3M", "6M", "12M")
                 },
+                **_analytics_columns(asset, benchmark),
             }
         )
 

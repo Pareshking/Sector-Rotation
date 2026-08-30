@@ -87,7 +87,9 @@ def ranked_table(
     period_cols = [f"{prefix}{p}" for p in LOOKBACKS]
     display_cols = [
         "position", "exposure", "model_action", "momentum_z", "stage",
-        "rs_trend", "rs_ratio", "rs_momentum", *period_cols, "tradeable", "category",
+        "rs_trend", "rs_ratio", "rs_momentum", *period_cols,
+        "consistency_overall", "consistency_downside", "alpha", "beta",
+        "sharpe_3y", "max_drawdown", "tradeable", "category",
     ]
     display_cols = [c for c in display_cols if c in view.columns]
 
@@ -95,6 +97,29 @@ def ranked_table(
         "position": st.column_config.NumberColumn("#", width="small", help="Order under the selected lookback"),
         "exposure": st.column_config.TextColumn("Exposure", width="medium", pinned=True),
         "category": st.column_config.TextColumn("Type", width="small"),
+        "consistency_overall": st.column_config.NumberColumn(
+            "Win rate", format="percent", width="small",
+            help="Share of rolling 1-year windows this exposure beat Nifty 50. "
+                 "A high rank with a low win rate is a recent move, not durable leadership.",
+        ),
+        "consistency_downside": st.column_config.NumberColumn(
+            "Win ↓mkt", format="percent", width="small",
+            help="Win rate in the windows where Nifty 50 itself fell. Separates real "
+                 "sector strength from leveraged beta.",
+        ),
+        "alpha": st.column_config.NumberColumn(
+            "Alpha", format="percent", width="small",
+            help="Annualised Jensen's alpha vs Nifty 50, after beta",
+        ),
+        "beta": st.column_config.NumberColumn(
+            "Beta", format="%.2f", width="small", help="Sensitivity to Nifty 50",
+        ),
+        "sharpe_3y": st.column_config.NumberColumn(
+            "Sharpe 3Y", format="%+.2f", width="small", help="3-year Sharpe, risk-free 6.5%",
+        ),
+        "max_drawdown": st.column_config.NumberColumn(
+            "Max DD", format="percent", width="small", help="Worst peak-to-trough fall in 5 years",
+        ),
         "tradeable": st.column_config.CheckboxColumn(
             "Buyable", width="small",
             help="A listed ETF that traded at the last NSE snapshot, or an open-ended index fund",

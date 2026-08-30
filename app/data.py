@@ -145,3 +145,25 @@ def _liquidity(modified_ns: int = 0) -> pd.DataFrame:
 def exposure_liquidity() -> pd.DataFrame:
     """Most-traded ETF per exposure, with its premium or discount to NAV."""
     return _liquidity(_mtime("etf_universe.parquet"))
+
+
+@st.cache_data(show_spinner=False)
+def _tracking(exposure_id: str, modified_ns: int = 0) -> pd.DataFrame:
+    del modified_ns
+    from src.quantitative.analytics import vehicle_tracking_table
+
+    panel, _ = load_index_panel()
+    if panel.empty or exposure_id not in panel.columns:
+        return pd.DataFrame()
+    etfs = load_etfs()
+    if etfs.empty:
+        return pd.DataFrame()
+    vehicles = etfs[etfs["exposure_id"].astype(str) == str(exposure_id)]
+    return vehicle_tracking_table(load_etf_prices(), vehicles, panel[exposure_id])
+
+
+def vehicle_tracking(exposure_id: str) -> pd.DataFrame:
+    """Tracking difference and error for each vehicle against its own index."""
+    return _tracking(
+        exposure_id, _mtime("etf_prices.parquet") + _mtime("index_prices.parquet")
+    )

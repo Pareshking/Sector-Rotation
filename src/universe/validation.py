@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from src.models.exposure import Exposure
+from src.models.exposure import Exposure, VehicleType
 
 NSE_SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9&._-]{0,29}$")
 YF_NSE_RE = re.compile(r"^[A-Z0-9][A-Z0-9&._-]{0,29}\.NS$")
@@ -51,8 +51,14 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
             all_aliases.extend(etf.aliases)
             if etf.yfinance_symbol and not YF_NSE_RE.fullmatch(etf.yfinance_symbol):
                 errors.append(f"{exposure.id}/{symbol or etf.scheme_code}: invalid Yahoo NSE alias {etf.yfinance_symbol}")
-            if not etf.yfinance_symbol:
-                warnings.append(f"{exposure.id}/{symbol or etf.scheme_code}: missing yfinance symbol; official/AMFI fallback required")
+            # Yahoo is the last-resort source, and an open-ended index fund is
+            # not exchange-listed at all, so a missing alias is only worth
+            # noting for an exchange-traded vehicle with no scheme code either.
+            if not etf.yfinance_symbol and etf.vehicle is VehicleType.ETF and etf.scheme_code is None:
+                warnings.append(
+                    f"{exposure.id}/{symbol or etf.name}: no AMFI scheme code and no Yahoo alias; "
+                    "NSE is the only available source"
+                )
             if etf.scheme_code is None:
                 warnings.append(f"{exposure.id}/{symbol or etf.name}: MFAPI scheme code will be resolved by search")
     for symbol, count in Counter(etf_symbols).items():

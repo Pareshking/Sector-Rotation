@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.components.theme import STAGE_COLORS
+from src.quantitative.analytics import repair_level_shifts as _repair
 
 INK = "#0B1220"
 MUTED = "#64748B"
@@ -185,38 +186,16 @@ def rs_trajectory(rs: pd.DataFrame, exposure: str, window: int = 104, height: in
 
 @st.cache_data(show_spinner=False)
 def repair_level_shifts(series: pd.Series) -> tuple[pd.Series, list[dict[str, object]]]:
-    """Undo split/unit-change discontinuities so they do not read as returns.
-
-    Cached because each ETF chart used to re-run this O(n) scan from scratch.
-    """
-    clean = pd.to_numeric(series, errors="coerce").dropna().astype(float).sort_index().copy()
-    if len(clean) < 25:
-        return clean, []
+    """Cached wrapper over the shared split repair, plus what it corrected."""
+    raw = pd.to_numeric(series, errors="coerce").dropna().astype(float).sort_index()
+    fixed = _repair(raw)
     repairs: list[dict[str, object]] = []
-    for _ in range(4):
-        values = clean.to_numpy(copy=True)
-        changed = False
-        for i in range(10, len(values) - 10):
-            prev, current = float(values[i - 1]), float(values[i])
-            if prev <= 0 or current <= 0:
-                continue
-            day_ratio = current / prev
-            pre = float(pd.Series(values[i - 10:i]).median())
-            post = float(pd.Series(values[i:i + 10]).median())
-            if pre <= 0:
-                continue
-            level_ratio = post / pre
-            if not (level_ratio >= 2.5 or level_ratio <= 0.4):
-                continue
-            if abs(math.log(day_ratio / level_ratio)) > 0.18:
-                continue
-            clean.iloc[:i] *= level_ratio
-            repairs.append({"date": clean.index[i], "factor": level_ratio})
-            changed = True
-            break
-        if not changed:
-            break
-    return clean, repairs
+    if len(raw) == len(fixed) and not raw.empty:
+        ratio = (fixed / raw).round(6)
+        changes = ratio.ne(ratio.shift()).fillna(False)
+        for stamp in ratio.index[changes][1:]:
+            repairs.append({"date": stamp, "factor": float(ratio.loc[stamp])})
+    return fixed, repairs
 
 
 def etf_comparison(prices: pd.DataFrame, symbols: list[str], height: int = 320) -> tuple[go.Figure, str]:

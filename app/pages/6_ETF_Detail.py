@@ -23,7 +23,7 @@ from app.components.theme import (
     page_header,
     section,
 )
-from app.data import load_decisions, load_etf_prices, load_etfs, load_rs
+from app.data import load_decisions, load_etf_prices, load_etfs, load_rs, vehicle_tracking
 
 inject_theme()
 page_header(
@@ -45,7 +45,14 @@ etf_prices = load_etf_prices()
 # Every exposure is selectable, not only the ones with a mapped ETF. Restricting
 # the picker to ETF rows hid 25 of 43 exposures from this page entirely.
 options = decisions.exposure.tolist()
-exposure = st.selectbox("Exposure", options, key="detail_exposure")
+picker = st.columns([2.2, 1])
+exposure = picker[0].selectbox("Exposure", options, key="detail_exposure")
+picker[1].number_input(
+    "Book size (₹ lakh)", min_value=1.0, max_value=10000.0, value=30.0, step=5.0,
+    key="book_lakh",
+    help="Used to judge whether liquidity actually constrains you at your size.",
+)
+st.session_state["book_size"] = float(st.session_state.get("book_lakh", 30.0)) * 100000
 signal = decisions[decisions.exposure == exposure].iloc[0]
 selected = etfs[etfs.exposure == exposure].copy() if not etfs.empty else pd.DataFrame()
 
@@ -94,6 +101,43 @@ kpi_strip(
     ]
 )
 
+section("Durability", "Rank says who is strongest today; these say whether it has held up")
+_pct = lambda v: fmt_pct(v, 0)
+kpi_strip(
+    [
+        (
+            "1Y win rate",
+            _pct(signal.get("consistency_overall")),
+            "rolling years beating Nifty 50",
+            "buy" if (signal.get("consistency_overall") or 0) >= 0.6 else "amber",
+        ),
+        (
+            "Win in falling market",
+            _pct(signal.get("consistency_downside")),
+            "when Nifty 50 itself fell",
+            "buy" if (signal.get("consistency_downside") or 0) >= 0.5 else "amber",
+        ),
+        ("Alpha", fmt_pct(signal.get("alpha")), "annualised, after beta", ""),
+        ("Beta", fmt_num(signal.get("beta")), f"R² {fmt_num(signal.get('r_squared'))}", ""),
+    ]
+)
+kpi_strip(
+    [
+        ("Sharpe 3Y", fmt_num(signal.get("sharpe_3y")), "risk-free 6.5%", ""),
+        ("Volatility 3Y", fmt_pct(signal.get("volatility_3y")), "annualised", ""),
+        ("Max drawdown", fmt_pct(signal.get("max_drawdown")), "worst 5-year fall", "amber"),
+        ("Off its high", fmt_pct(signal.get("drawdown_from_high")), "today", ""),
+    ]
+)
+rolling_median = signal.get("rolling_3y_median")
+if rolling_median == rolling_median and rolling_median is not None:
+    note(
+        f"Median rolling 3-year return is <b>{fmt_pct(rolling_median)}</b>, with a worst window of "
+        f"<b>{fmt_pct(signal.get('rolling_3y_min'))}</b> and "
+        f"<b>{_pct(signal.get('rolling_3y_positive'))}</b> of windows positive. "
+        "A point-to-point return depends on two dates; this is the whole distribution."
+    )
+
 exposure_id = str(signal.get("exposure_id", ""))
 if exposure_id in getattr(rs, "columns", []):
     section("Relative strength", "Mansfield RS against Nifty 50 · 52-week baseline")
@@ -106,7 +150,16 @@ if selected.empty:
         "there is no direct instrument in the universe to express it."
     )
 else:
-    vehicles = selected.sort_values("traded_value", ascending=False) if "traded_value" in selected else selected
+    vehicles = selected.copy()
+    track = vehicle_tracking(exposure_id)
+    if not track.empty:
+        key = "symbol" if track["symbol"].notna().all() else "name"
+        vehicles = vehicles.merge(
+            track[[key, "tracking_difference", "tracking_error", "history_years"]],
+            on=key, how="left",
+        )
+    if "traded_value" in vehicles:
+        vehicles = vehicles.sort_values("traded_value", ascending=False)
     st.dataframe(
         vehicles,
         hide_index=True,
@@ -136,9 +189,44 @@ else:
             "last_price": st.column_config.NumberColumn("Price", format="%.2f", width="small"),
             "nav": st.column_config.NumberColumn("NAV", format="%.2f", width="small"),
             "expense_ratio": st.column_config.NumberColumn("Expense", format="%.2f", width="small"),
-            "tracking_error": st.column_config.NumberColumn("Tracking err", format="%.2f", width="small"),
+            "tracking_difference": st.column_config.NumberColumn(
+                "Track diff", format="percent", width="small",
+                help="Annualised return the vehicle gave up against its own index. This is what "
+                     "the holder actually lost — expense ratio plus everything else.",
+            ),
+            "tracking_error": st.column_config.NumberColumn(
+                "Track err", format="percent", width="small",
+                help="How erratically it gave it up. A fund can have a low error and still bleed "
+                     "a consistent amount, which is the difference that matters.",
+            ),
+            "history_years": st.column_config.NumberColumn(
+                "Yrs", format="%.1f", width="small",
+                help="Years of overlapping history the tracking figures are measured over",
+            ),
         },
     )
+    if "traded_value" in vehicles.columns and vehicles["traded_value"].notna().any():
+        from src.data.nse_etf import DEFAULT_BOOK_RUPEES, position_headroom
+
+        book = st.session_state.get("book_size", DEFAULT_BOOK_RUPEES)
+        best = pd.to_numeric(vehicles["traded_value"], errors="coerce").max()
+        head = position_headroom(float(best), book=float(book))
+        clears = head["days_to_build"] <= 1
+        note(
+            f"On a <b>₹{book / 100000:.0f} lakh</b> book a top-2 position is about "
+            f"<b>₹{head['position'] / 100000:.1f} lakh</b>. Against the most liquid vehicle here "
+            f"that is <b>{head['day_share']:.1%}</b> of a day's turnover — "
+            + (
+                "it clears in a single day at a 10% participation cap. Liquidity is not the "
+                "binding constraint at this size; tracking difference and premium are."
+                if clears
+                else f"about <b>{head['days_to_build']:.1f} trading days</b> to build at a 10% "
+                "participation cap. Prefer the index-fund route here, which transacts at NAV "
+                "regardless of volume."
+            ),
+            tone="" if clears else "amber",
+        )
+
     if "premium_discount_pct" in vehicles.columns:
         rich = vehicles[pd.to_numeric(vehicles["premium_discount_pct"], errors="coerce") > 1.0]
         if not rich.empty:

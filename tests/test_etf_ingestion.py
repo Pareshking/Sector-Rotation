@@ -20,7 +20,47 @@ def _mfapi_result(rows: int = 60):
     )()
 
 
+def _no_nse(monkeypatch):
+    """Silence the NSE leg so a test can exercise the fallbacks behind it."""
+    monkeypatch.setattr(etf_data, "fetch_nse_histories", lambda *a, **k: {})
+
+
+def test_nse_is_tried_before_every_other_source(monkeypatch):
+    """An ETF is an NSE-listed security; the exchange comes first.
+
+    Yahoo going down previously dropped healthy ETFs out of the dataset because
+    instruments without a scheme code went straight to it.
+    """
+    etf = ETFMapping(symbol="ITBEES", name="Nippon India Nifty IT ETF",
+                     yfinance_symbol="ITBEES.NS")
+    series = pd.Series(range(1, 300), index=pd.date_range("2026-01-01", periods=299), name="ITBEES")
+    monkeypatch.setattr(etf_data, "fetch_nse_histories", lambda *a, **k: {"ITBEES": series})
+    monkeypatch.setattr(etf_data, "download_market_history",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Yahoo must not run")))
+    monkeypatch.setattr(etf_data, "fetch_etf_nav",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("MFAPI must not run")))
+
+    frame, sources, _ = etf_data.fetch_etf_histories([etf])
+    assert sources["ITBEES"] == "nse"
+    assert "ITBEES" in frame
+
+
+def test_amfi_is_tried_before_yahoo(monkeypatch):
+    etf = ETFMapping(name="Kotak Nifty Realty Index Fund", scheme_code=999001,
+                     vehicle="index_fund")
+    _no_nse(monkeypatch)
+    monkeypatch.setattr(etf_data, "fetch_all_mfapi_histories", lambda *a, **k: ({}, {}, [etf]))
+    nav = pd.Series(range(1, 200), index=pd.date_range("2026-01-01", periods=199))
+    monkeypatch.setattr(etf_data, "_amfi_fallback", lambda *a, **k: nav)
+    monkeypatch.setattr(etf_data, "download_market_history",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Yahoo must not run")))
+
+    _, sources, _ = etf_data.fetch_etf_histories([etf])
+    assert sources["Kotak Nifty Realty Index Fund"] == "amfi"
+
+
 def test_complete_mfapi_series_never_calls_yahoo(monkeypatch):
+    _no_nse(monkeypatch)
     etf = ETFMapping(
         symbol="METALIETF",
         name="ICICI Prudential Nifty Metal ETF",
@@ -49,6 +89,7 @@ def test_complete_mfapi_series_never_calls_yahoo(monkeypatch):
 
 
 def test_scheme_without_complete_mfapi_can_fall_back_to_yahoo(monkeypatch):
+    _no_nse(monkeypatch)
     etf = ETFMapping(
         symbol="B22",
         name="Bharat 22 ETF",
@@ -60,6 +101,8 @@ def test_scheme_without_complete_mfapi_can_fall_back_to_yahoo(monkeypatch):
     yahoo = pd.DataFrame({"ICICIB22.NS": range(60)}, index=pd.date_range("2026-01-01", periods=60))
 
     monkeypatch.setattr(etf_data, "fetch_etf_nav", lambda *args, **kwargs: empty)
+    # AMFI now sits ahead of Yahoo; it must come up empty for Yahoo to be reached.
+    monkeypatch.setattr(etf_data, "_amfi_fallback", lambda *a, **k: pd.Series(dtype="float64"))
     monkeypatch.setattr(etf_data, "download_market_history", lambda *args, **kwargs: yahoo)
 
     frame, sources, _ = etf_data.fetch_etf_histories([etf])
@@ -132,3 +175,28 @@ def test_index_funds_carry_a_scheme_code_not_a_ticker():
     for fund in funds:
         assert fund.scheme_code, f"{fund.name} has no AMFI scheme code"
         assert fund.symbol is None, f"{fund.name} is not exchange-traded but carries a ticker"
+
+
+def test_nse_timestamps_are_normalised_to_the_ist_trading_date():
+    """jugaad returns UTC instants; an IST session lands at 18:30 the day before.
+
+    Left alone, every NSE series is shifted a day against the index panel and
+    silently fails to align with it at all.
+    """
+    import pandas as pd
+
+    from src.data.nse_equity import _trading_dates
+
+    utc = pd.Series(pd.to_datetime(["2026-08-27T18:30:00Z", "2026-08-28T18:30:00Z"]))
+    out = _trading_dates(utc)
+    assert list(out.dt.strftime("%Y-%m-%d")) == ["2026-08-28", "2026-08-29"]
+    assert (out.dt.hour == 0).all()
+
+
+def test_naive_midnight_dates_are_left_alone():
+    import pandas as pd
+
+    from src.data.nse_equity import _trading_dates
+
+    naive = pd.Series(pd.to_datetime(["2026-08-27", "2026-08-28"]))
+    assert list(_trading_dates(naive).dt.strftime("%Y-%m-%d")) == ["2026-08-27", "2026-08-28"]

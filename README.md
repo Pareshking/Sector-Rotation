@@ -187,6 +187,39 @@ on any endpoint this project reads and stay null. Turnover and premium are the t
 often decide whether a signal is actionable — a thin sector ETF at a 2% premium hands back a
 chunk of the index's edge on entry.
 
+### Analytics
+
+Point-to-point returns depend entirely on two dates. Every judgement the app makes about
+durability is either distributional or risk-adjusted, computed in
+`src/quantitative/analytics.py` from our own series:
+
+| Metric | What it answers |
+| --- | --- |
+| Rolling CAGR — current / median / min / max / % positive | Has this held up, or is the headline one lucky window? |
+| Outperformance consistency, split up-market vs down-market | Real sector strength, or leveraged beta? A sector that only wins when the market rises is the market. |
+| Alpha, Beta, R² vs Nifty 50 | Does the excess return survive its beta? |
+| Sharpe, Sortino, annualised volatility (1Y/3Y/5Y) | Return per unit of risk, and of *downside* risk |
+| Max drawdown with peak, trough, duration, distance from high | What holding it actually felt like |
+| Tracking difference and tracking error per vehicle | Which fund to buy for a given index |
+
+Sharpe and Sortino assume a **6.5%** risk-free rate. That is an assumption, not data, and is
+stated wherever the ratios appear.
+
+**Tracking difference is the one that decides an implementation.** It is the annualised return a
+vehicle gave up against its own index — expense ratio plus everything else, which is what the
+holder actually lost. Tracking *error* only says how erratically it was given up: a fund can
+have a low error and still bleed a steady 80bps. Splits are repaired before any of this is
+computed; an unadjusted 10:1 unit change otherwise reads as a -40%/yr tracking difference.
+
+### Position sizing
+
+Turnover in rupees is the wrong lens for a retail book. The Exposure page converts it into
+**days to build a position** at a 10% participation cap, against a book size you set (default
+₹30 lakh). At that size most sector ETFs clear in a single day, so liquidity is rarely the
+binding constraint — tracking difference and premium to NAV are. Where a vehicle *is* thin, the
+page says how many days it would take and points at the index-fund route, which transacts at NAV
+regardless of volume.
+
 ### Choosing a new exposure
 
 NSE publishes 139 live indices; the rotation universe is 47. A candidate must clear three bars:

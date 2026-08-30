@@ -26,6 +26,38 @@
           "scheme_code": 149463,
           "yfinance_symbol": "AUTOIETF.NS",
           "exchange": "NSE"
+        },
+        {
+          "name": "HDFC Nifty Auto Index Fund",
+          "scheme_code": 154427,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "ICICI Prudential Nifty Auto Index Fund",
+          "scheme_code": 150643,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Nippon India Nifty Auto Index Fund",
+          "scheme_code": 153064,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Tata Nifty Auto Index Fund",
+          "scheme_code": 152557,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -52,6 +84,78 @@
           "aliases": [
             "KOTAKBKETF"
           ]
+        },
+        {
+          "name": "Axis Nifty Bank Index Fund",
+          "scheme_code": 152629,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "BANDHAN NIFTY BANK INDEX FUND",
+          "scheme_code": 152793,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "DSP Nifty Bank Index Fund",
+          "scheme_code": 152654,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "ICICI Prudential Nifty Bank Index Fund",
+          "scheme_code": 149858,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Invesco India Nifty Bank Index Fund",
+          "scheme_code": 154343,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Motilal Oswal Nifty Bank Index Fund",
+          "scheme_code": 147619,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Navi Nifty Bank Index Fund",
+          "scheme_code": 149804,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Nippon India Nifty Bank Index Fund",
+          "scheme_code": 152389,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "SBI Nifty Bank Index Fund",
+          "scheme_code": 153251,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -134,6 +238,14 @@
           "scheme_code": 149866,
           "yfinance_symbol": null,
           "exchange": "NSE"
+        },
+        {
+          "name": "Tata Nifty Financial Services Index Fund",
+          "scheme_code": 152577,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -199,6 +311,14 @@
           "scheme_code": 148858,
           "yfinance_symbol": "HEALTHIETF.NS",
           "exchange": "NSE"
+        },
+        {
+          "name": "DSP Nifty Healthcare Index Fund",
+          "scheme_code": 153593,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -246,6 +366,62 @@
           "aliases": [
             "KOTAKIT"
           ]
+        },
+        {
+          "name": "Axis Nifty IT Index Fund",
+          "scheme_code": 151785,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Bandhan Nifty IT Index Fund",
+          "scheme_code": 152041,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "DSP Nifty IT Index Fund",
+          "scheme_code": 153590,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "ICICI Prudential Nifty IT Index Fund",
+          "scheme_code": 150468,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Navi NiftyIT Index Fund",
+          "scheme_code": 152535,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Nippon India Nifty IT Index Fund",
+          "scheme_code": 152392,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "SBI Nifty IT Index Fund",
+          "scheme_code": 153320,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -332,6 +508,14 @@
           "scheme_code": 149028,
           "yfinance_symbol": "PHARMABEES.NS",
           "exchange": "NSE"
+        },
+        {
+          "name": "ICICI Prudential Nifty Pharma Index Fund",
+          "scheme_code": 150930,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -403,6 +587,38 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "DSP Nifty Private Bank Index Fund",
+          "scheme_code": 153348,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Groww Nifty Private Bank Index Fund",
+          "scheme_code": 154346,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "ICICI Prudential Nifty Private Bank Index Fund",
+          "scheme_code": 153679,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "UTI Nifty Private Bank Index Fund",
+          "scheme_code": 152864,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -419,6 +635,14 @@
           "scheme_code": 105658,
           "yfinance_symbol": "PSUBNKBEES.NS",
           "exchange": "NSE"
+        },
+        {
+          "name": "Groww Nifty PSU Bank Index Fund",
+          "scheme_code": 154278,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -441,6 +665,22 @@
         {
           "name": "HDFC NIFTY Realty Index Fund",
           "scheme_code": 152522,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Nippon India Nifty Realty Index Fund",
+          "scheme_code": 153060,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Tata Nifty Realty Index Fund",
+          "scheme_code": 152570,
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -476,6 +716,30 @@
           "scheme_code": 152865,
           "yfinance_symbol": null,
           "exchange": "NSE"
+        },
+        {
+          "name": "Aditya Birla Sun Life Nifty India Defence Index Fund",
+          "scheme_code": 152798,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Axis Nifty India Defence Index Fund",
+          "scheme_code": 154326,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Motilal Oswal Nifty India Defence Index Fund",
+          "scheme_code": 152712,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -511,6 +775,30 @@
           "scheme_code": 149296,
           "yfinance_symbol": "MAKEINDIA.NS",
           "exchange": "NSE"
+        },
+        {
+          "name": "Navi Nifty India Manufacturing Index Fund",
+          "scheme_code": 150515,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Nippon India Nifty India Manufacturing Index Fund",
+          "scheme_code": 153807,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "UTI Nifty India Manufacturing Index Fund",
+          "scheme_code": 153270,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -563,6 +851,14 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "Groww Nifty India Railways PSU Index Fund",
+          "scheme_code": 153230,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -589,6 +885,22 @@
           "aliases": [
             "KOTAKCONS"
           ]
+        },
+        {
+          "name": "HDFC Nifty India Consumption Index Fund",
+          "scheme_code": 154180,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "SBI Nifty India Consumption Index Fund",
+          "scheme_code": 153015,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -700,6 +1012,14 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "Kotak Nifty Commodities Index Fund",
+          "scheme_code": 153353,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
@@ -718,6 +1038,30 @@
           "exchange": "NSE",
           "aliases": [],
           "tracking": {}
+        },
+        {
+          "name": "Axis Nifty Capital Markets Index Fund",
+          "scheme_code": 154348,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Motilal Oswal Nifty Capital Market Index Fund",
+          "scheme_code": 153138,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
+        },
+        {
+          "name": "Tata Nifty Capital Markets Index Fund",
+          "scheme_code": 152951,
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "vehicle": "index_fund"
         }
       ]
     },
