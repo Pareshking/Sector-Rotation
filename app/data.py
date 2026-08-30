@@ -79,19 +79,62 @@ def load_index_panel() -> tuple[pd.DataFrame, pd.Series]:
     return panel.drop(columns=[BENCHMARK_COLUMN]), benchmark
 
 
-@st.cache_data(show_spinner="Running the monthly backtest…")
-def _backtest(top_n: int, months: int, absolute_filter: bool, modified_ns: int = 0):
+@st.cache_data(show_spinner=False)
+def vehicles_by_exposure() -> dict[str, list[str]]:
+    """Exposure id -> the price-series keys of every vehicle mapped to it."""
+    etfs = load_etfs()
+    if etfs.empty or "exposure_id" not in etfs.columns:
+        return {}
+    keyed = etfs.assign(key=etfs["symbol"].fillna(etfs["name"]))
+    return {
+        str(k): list(v) for k, v in keyed.groupby("exposure_id")["key"].apply(list).items()
+    }
+
+
+@st.cache_data(show_spinner="Running the backtest…")
+def _backtest(
+    top_n: int,
+    months: int,
+    hold_months: int,
+    absolute_filter: bool,
+    investable_only: bool,
+    require_buy: bool,
+    max_rank_depth: int,
+    modified_ns: int = 0,
+):
     del modified_ns
     from src.quantitative.backtest import run_backtest
 
     panel, benchmark = load_index_panel()
     return run_backtest(
-        panel, benchmark, top_n=top_n, months=months, absolute_filter=absolute_filter
+        panel,
+        benchmark,
+        top_n=top_n,
+        months=months,
+        hold_months=hold_months,
+        absolute_filter=absolute_filter,
+        investable_only=investable_only,
+        require_buy=require_buy,
+        max_rank_depth=max_rank_depth,
+        vehicle_prices=load_etf_prices() if investable_only else None,
+        vehicles_by_exposure=vehicles_by_exposure() if investable_only else None,
     )
 
 
-def load_backtest(top_n: int = 2, months: int = 12, absolute_filter: bool = True):
-    return _backtest(top_n, months, absolute_filter, _mtime("index_prices.parquet"))
+def load_backtest(
+    top_n: int = 2,
+    months: int = 12,
+    hold_months: int = 1,
+    absolute_filter: bool = True,
+    investable_only: bool = False,
+    require_buy: bool = False,
+    max_rank_depth: int = 3,
+):
+    stamp = _mtime("index_prices.parquet") + _mtime("etf_prices.parquet") + _mtime("etf_universe.parquet")
+    return _backtest(
+        top_n, months, hold_months, absolute_filter,
+        investable_only, require_buy, max_rank_depth, stamp,
+    )
 
 
 @st.cache_data(show_spinner=False)

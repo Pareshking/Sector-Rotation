@@ -34,24 +34,59 @@ if panel.empty or benchmark.empty:
     st.stop()
 
 section("Strategy")
-controls = st.columns([1.15, 1.05, 1.3])
+MODES = {
+    "Full universe": (False, False),
+    "Investable only": (True, False),
+    "Investable + BUY signal": (True, True),
+}
+mode = st.segmented_control(
+    "Universe",
+    list(MODES),
+    default="Investable + BUY signal",
+    key="bt_mode",
+    help="Full universe ranks all 47 indices, including ones with no buyable vehicle. "
+    "Investable restricts each pick to exposures that had a fund you could actually have "
+    "bought on that date. Adding the BUY signal also demands the live entry rule.",
+)
+investable_only, require_buy = MODES.get(mode or "Investable + BUY signal", (True, True))
+
+controls = st.columns(3)
 top_n = controls[0].segmented_control(
     "Hold top", [1, 2, 3, 5], default=2, key="bt_topn",
-    help="Number of exposures held, equally weighted, until the next month end.",
+    help="Exposures held, equally weighted, until the next rebalance.",
 )
-months = controls[1].segmented_control(
-    "Window", [12, 24, 36, 60], default=12, key="bt_months",
-    help="Backtest length in months. Twelve is the minimum.",
+hold_months = controls[1].segmented_control(
+    "Holding period", [1, 2, 3, 6], default=1, key="bt_hold",
+    help="Months a decision is left alone before the ranking is revisited.",
 )
-absolute_filter = controls[2].toggle(
-    "Absolute momentum filter (dual momentum)",
-    value=True,
-    key="bt_abs",
-    help="Only hold an exposure whose own 12-month return is positive; otherwise that slot sits "
-         "in cash at 0%.",
+months = controls[2].segmented_control(
+    "History window", [12, 24, 36, 60], default=60, key="bt_months",
+    help="Months of price history to draw on. The ranking needs a full 12-month history "
+    "before it can pick anything, so the first year of the window is warm-up and produces "
+    "fewer months of actual returns.",
 )
 
-result = load_backtest(top_n=top_n or 2, months=months or 12, absolute_filter=absolute_filter)
+extra = st.columns(2)
+max_rank_depth = extra[0].segmented_control(
+    "Substitute down to rank", [2, 3, 5], default=3, key="bt_depth",
+    help="When the top-ranked exposure cannot be bought, how far down the ranking to look "
+    "before the slot goes to cash instead.",
+)
+absolute_filter = extra[1].toggle(
+    "Absolute momentum filter (dual momentum)", value=True, key="bt_abs",
+    help="Only hold an exposure whose own 12-month return is positive; otherwise that slot "
+         "sits in cash at 0%.",
+)
+
+result = load_backtest(
+    top_n=top_n or 2,
+    months=months or 60,
+    hold_months=hold_months or 1,
+    absolute_filter=absolute_filter,
+    investable_only=investable_only,
+    require_buy=require_buy,
+    max_rank_depth=max_rank_depth or 3,
+)
 if not result.ok:
     note(f"<b>Backtest unavailable.</b> {result.error}", tone="amber")
     st.stop()
@@ -67,9 +102,25 @@ def _pretty(holdings: str) -> str:
     return ", ".join(NAMES.get(part.strip(), part.strip()) for part in str(holdings).split(","))
 
 
+def _pretty_reasons(text: str) -> str:
+    """Turn 'defence:no vehicle; it:not BUY' into readable names."""
+    if not text:
+        return ""
+    parts = []
+    for item in str(text).split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        exposure_id, _, reason = item.partition(":")
+        parts.append(f"{NAMES.get(exposure_id.strip(), exposure_id.strip())} — {reason.strip()}")
+    return "; ".join(parts)
+
+
 def _named(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["holdings"] = out["holdings"].map(_pretty)
+    if "skipped" in out.columns:
+        out["skipped"] = out["skipped"].map(_pretty_reasons)
     return out
 
 
@@ -105,14 +156,47 @@ kpi_strip(
 )
 kpi_strip(
     [
-        ("Months ahead of Nifty", f"{stats['hit_rate'] * 100:.0f}%", "monthly hit rate", ""),
-        ("Positive months", f"{stats['win_rate'] * 100:.0f}%", "strategy return > 0", ""),
+        (
+            "Periods ahead of Nifty",
+            f"{stats['hit_rate'] * 100:.0f}%",
+            f"{int(stats['periods'])} × {int(stats['hold_months'])}M periods",
+            "",
+        ),
+        ("Positive periods", f"{stats['win_rate'] * 100:.0f}%", "strategy return > 0", ""),
         ("Volatility", fmt_pct(stats["volatility"]), f"Nifty {fmt_pct(stats['benchmark_volatility'])}", ""),
-        ("Avg turnover", fmt_pct(stats["avg_turnover"]), "of the book each month", ""),
+        ("Avg turnover", fmt_pct(stats["avg_turnover"]), "of the book each rebalance", ""),
     ]
 )
 
-section("Growth of ₹100", "Strategy against Nifty 50 over the same months")
+warmup = stats.get("warmup_months", 0.0)
+if warmup > 0:
+    note(
+        f"<b>{int(stats['requested_months'])} months of history produced "
+        f"{int(stats['months'])} months of returns.</b> The ranking needs a full 12-month "
+        "history before it can choose anything, so the opening "
+        f"{int(warmup)} months of the window are warm-up and hold nothing. Every figure "
+        "here is measured over the "
+        f"{int(stats['months'])} months that followed."
+    )
+
+cash_periods = float((result.monthly["cash_slots"] > 0).mean())
+if investable_only and cash_periods > 0:
+    note(
+        f"<b>{cash_periods:.0%} of periods left at least one slot in cash</b> because the "
+        "top-ranked exposures had no fund you could have bought at the time. Investability is "
+        "judged from each vehicle's own price history, not from the fact that it exists today — "
+        "most of these ETFs and index funds launched in 2024–25.",
+        tone="amber",
+    )
+if not investable_only:
+    note(
+        "<b>Full universe includes exposures with no buyable vehicle.</b> It measures the signal, "
+        "not a portfolio you could have held. Switch to <i>Investable only</i> for what was "
+        "actually purchasable on each date.",
+        tone="amber",
+    )
+
+section("Growth of ₹100", "Strategy against Nifty 50 over the same period")
 st.plotly_chart(equity_curve(result.equity), width="stretch", config=CHART_CONFIG)
 
 section("Monthly excess return", "Green months beat Nifty 50; hover for the holdings")
@@ -122,14 +206,17 @@ section("Month-by-month record")
 ledger = _named(result.monthly)
 ledger["Month"] = pd.to_datetime(ledger["period_end"]).dt.strftime("%b %Y")
 ledger = ledger[
-    ["Month", "holdings", "strategy_return", "benchmark_return", "excess_return", "universe"]
+    ["Month", "holdings", "cash_slots", "strategy_return", "benchmark_return",
+     "excess_return", "universe", "skipped"]
 ].rename(
     columns={
         "holdings": "Held",
+        "cash_slots": "Cash",
         "strategy_return": "Strategy",
         "benchmark_return": "Nifty 50",
         "excess_return": "Excess",
         "universe": "Eligible",
+        "skipped": "Passed over",
     }
 )
 st.dataframe(
@@ -143,8 +230,14 @@ st.dataframe(
         "Strategy": st.column_config.NumberColumn(format="percent", width="small"),
         "Nifty 50": st.column_config.NumberColumn(format="percent", width="small"),
         "Excess": st.column_config.NumberColumn(format="percent", width="small"),
+        "Cash": st.column_config.NumberColumn(
+            width="small", help="Slots left in cash because nothing qualified"
+        ),
         "Eligible": st.column_config.NumberColumn(
-            width="small", help="Exposures with enough history to be ranked that month"
+            width="small", help="Exposures with enough history to be ranked that period"
+        ),
+        "Passed over": st.column_config.TextColumn(
+            width="medium", help="Higher-ranked exposures skipped, and why"
         ),
     },
 )
@@ -158,25 +251,33 @@ st.download_button(
 
 section("How to read this")
 note(
-    "<b>Method.</b> On the last trading day of each month the universe is ranked by the composite "
-    "momentum Z-score using only prices up to that day. The top "
-    f"{top_n or 2} exposures are held, equally weighted, until the next month end. The return of a "
-    "decision is measured entirely after the decision was made."
+    "<b>Method.</b> On the last trading day of every "
+    f"{int(hold_months or 1)}-month period the universe is ranked by composite momentum "
+    "Z-score using only prices up to that day. The top "
+    f"{top_n or 2} qualifying exposures are held, equally weighted, until the next rebalance. "
+    "The return of a decision is measured entirely after the decision was made."
     + (
-        " With the absolute-momentum filter on, an exposure is skipped when its own trailing "
-        "12-month return is negative, and that slot earns 0% in cash."
+        " A pick must have had a buyable vehicle on that date, judged from the vehicle's own "
+        f"price history. When the top name fails, the next is taken, down to rank "
+        f"{max_rank_depth or 3}; past that the slot goes to cash."
+        if investable_only
+        else ""
+    )
+    + (" A pick must also satisfy the live BUY rule: Leading stage, RS ratio above 1, positive "
+       "RS velocity." if require_buy else "")
+    + (
+        " With the absolute-momentum filter on, an exposure whose own trailing 12-month return "
+        "is negative is skipped and that slot earns 0% in cash."
         if absolute_filter
-        else " The absolute-momentum filter is off, so the top-ranked exposures are held even in a "
-        "falling market."
+        else " The absolute-momentum filter is off."
     )
 )
 note(
-    "<b>What this is not.</b> These are index levels, not fund returns: no brokerage, spread, "
-    "STT, expense ratio, tracking error or tax is deducted, and an index cannot be bought "
-    "directly — the ETF that implements it will lag. The eligible universe grows over time as "
-    "newer indices reach a full 12-month history, so early months are chosen from a smaller set. "
-    "Index reconstitution is embedded in the published series. A 12-month sample is far too short "
-    "to distinguish skill from luck; treat it as a sanity check on the signal, not as evidence of "
-    "an edge.",
+    "<b>What this is not.</b> Transaction costs are deliberately zero — no brokerage, spread, "
+    "STT, expense ratio or tax — so a real book would earn less, and more so at higher turnover. "
+    "These are index levels, and an index cannot be bought directly; the fund tracking it lags by "
+    "its tracking difference. Funds that launched and later closed are absent, so even the "
+    "investable universe carries some survivorship bias. Index reconstitution is embedded in the "
+    "published series. Treat this as a sanity check on the signal, not as evidence of an edge.",
     tone="amber",
 )

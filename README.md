@@ -202,6 +202,15 @@ durability is either distributional or risk-adjusted, computed in
 | Max drawdown with peak, trough, duration, distance from high | What holding it actually felt like |
 | Tracking difference and tracking error per vehicle | Which fund to buy for a given index |
 
+A **Z-score is standardised to a mean of exactly zero**, so roughly half the universe sits below
+the line by construction. A negative momentum Z means *below the universe average*, not a loss —
+Banking currently sits at −0.32 with a +7.7% three-month return. Charts and axes say so
+explicitly, because a bar pointing left reads as a loss otherwise.
+
+Every table in the app draws its labels and number formats from one registry
+(`app/components/tables.COLUMNS`), including the raw audit dumps, so a column reads the same
+everywhere instead of falling back to `return_3M` and bare decimals.
+
 Sharpe and Sortino assume a **6.5%** risk-free rate. That is an assumption, not data, and is
 stated wherever the ratios appear.
 
@@ -249,8 +258,40 @@ NSE publishes 139 live indices; the rotation universe is 47. A candidate must cl
   assumed, which understates the filtered variant rather than flattering it.
 - Minimum window is 12 months; 24, 36 and 60 are also selectable.
 
-**Limits, stated plainly.** These are index levels, not fund returns — no brokerage, spread,
-STT, expense ratio, tracking error or tax is deducted, and an index cannot be bought directly.
+**Universe modes.** The backtest can run three ways, and the difference is large:
+
+| Mode | 60-month result | Excess vs Nifty 50 |
+| --- | --- | --- |
+| Full universe | +279.7% | **+237.3%** |
+| Investable only | +68.6% | +26.2% |
+| Investable + BUY signal | +43.6% | **+1.1%** |
+
+Full universe ranks all 47 indices including ones with no buyable vehicle: it measures the
+*signal*, not a portfolio anyone could have held. Investable restricts each pick to exposures
+that had a fund you could actually have bought **on that date**, judged from the vehicle's own
+price history rather than the fact that it exists today — most of these ETFs and index funds
+launched in 2024–25, so treating them as available in 2021 would be look-ahead of the worst
+kind. Adding the BUY gate also demands the live entry rule. Where the top-ranked name fails a
+test the next is taken, down to a configurable rank (default 3); past that the slot goes to cash.
+
+Nearly all the apparent edge is in the gap between those rows. Read the investable numbers.
+
+**Holding period** is selectable (1, 2, 3 or 6 months) and is separate from the history window.
+
+**The history window is not the return window.** The ranking needs a full 12-month history
+before it can pick anything, so a 60-month window yields 48 months of returns; the opening year
+is warm-up. The page states both, and every statistic is measured over the months that actually
+produced a holding.
+
+**Ranking versus the absolute filter.** The rank is a composite Z across 1M/3M/6M/12M; the
+absolute-momentum filter uses 12M alone. That difference is what lets the filter bite — ranking
+on *relative* return and filtering on *absolute* over the same window can never disagree, since
+both subtract the same benchmark. `test_absolute_filter_rejects_a_composite_winner_with_negative_12m`
+pins the case where the composite leader is down over 12 months and is correctly passed over.
+
+**Limits, stated plainly.** Transaction costs are deliberately zero — no brokerage, spread,
+STT, expense ratio, tracking error or tax — so a real book earns less, and more so at higher
+turnover. These are index levels, and an index cannot be bought directly.
 The eligible universe grows over time as newer indices reach a full 12-month history. Index
 reconstitution is embedded in the published series. A 12-month sample cannot distinguish skill
 from luck; treat it as a sanity check on the signal, not as evidence of an edge.

@@ -27,6 +27,106 @@ from app.components.theme import (
     stage_cell,
 )
 
+
+# --------------------------------------------------------------------------- #
+# One taxonomy for every table in the app
+# --------------------------------------------------------------------------- #
+# Label and format live here and nowhere else, so a column reads the same in the
+# ranking, the screener and the raw audit dump. The audit expander previously
+# showed bare frames — "return_3M", 0.0556 — which is a different vocabulary for
+# the same numbers.
+PERCENT = "percent"
+COLUMNS: dict[str, tuple[str, str, str]] = {
+    # key: (label, kind, help)
+    "position": ("#", "int", "Order under the selected lookback"),
+    "rank": ("Rank", "int", "Composite momentum rank across the universe"),
+    "exposure": ("Exposure", "text", ""),
+    "exposure_id": ("ID", "text", "Internal identifier"),
+    "category": ("Type", "text", "Sector or thematic"),
+    "benchmark": ("Benchmark", "text", "Configured canonical index"),
+    "resolved_official_index_name": ("Resolved index", "text", "Index NSE actually served"),
+    "data_source": ("Source", "text", "Where the history came from"),
+    "value_type": ("Value", "text", "TRI = total return; CLOSE = price index; NAV = fund"),
+    "model_action": ("Action", "text", "BUY / REDUCE / WATCH"),
+    "watch_kind": ("Watch type", "text", "Rolling over, holding, or early turn"),
+    "stage": ("Stage", "text", "Leading, Weakening, Lagging or Improving"),
+    "decision_reason": ("Why", "text", ""),
+    "analysis_note": ("Note", "text", ""),
+    "shares_index_with": ("Shares index with", "text", "Same underlying index as this exposure"),
+    "decision_eligible": ("Decision-grade", "bool", "Has an authoritative history"),
+    "tradeable": ("Buyable", "bool", "A listed ETF that trades, or an open-ended index fund"),
+    "momentum_z": ("Momentum Z", "z", "Cross-sectional Z of relative returns · 0 = universe average"),
+    "rs_ratio": ("RS ratio", "ratio3", "1.00 = in line with Nifty 50"),
+    "rs_momentum": ("RS vel", "signed1", "13-week change in Mansfield RS"),
+    "rs_trend": ("RS trend", "spark", "Mansfield relative strength, last 26 weeks"),
+    "return_1M": ("1M", PERCENT, "Index return over the window"),
+    "return_3M": ("3M", PERCENT, "Index return over the window"),
+    "return_6M": ("6M", PERCENT, "Index return over the window"),
+    "return_12M": ("12M", PERCENT, "Index return over the window"),
+    "relative_1M": ("1M vs N50", PERCENT, "Exposure return minus Nifty 50 over the window"),
+    "relative_3M": ("3M vs N50", PERCENT, "Exposure return minus Nifty 50 over the window"),
+    "relative_6M": ("6M vs N50", PERCENT, "Exposure return minus Nifty 50 over the window"),
+    "relative_12M": ("12M vs N50", PERCENT, "Exposure return minus Nifty 50 over the window"),
+    "alpha": ("Alpha", PERCENT, "Annualised Jensen's alpha vs Nifty 50, after beta"),
+    "beta": ("Beta", "ratio2", "Sensitivity to Nifty 50"),
+    "r_squared": ("R²", "ratio2", "Share of movement explained by Nifty 50"),
+    "information_ratio": ("Info ratio", "signed2", "Active return divided by tracking error"),
+    "tracking_error": ("Tracking err", PERCENT, "Annualised volatility of active return"),
+    "volatility_3y": ("Vol 3Y", PERCENT, "Annualised standard deviation"),
+    "sharpe_3y": ("Sharpe 3Y", "signed2", "Risk-free 6.5%"),
+    "sortino_3y": ("Sortino 3Y", "signed2", "Risk-free 6.5%, downside deviation only"),
+    "rolling_3y_median": ("Roll 3Y med", PERCENT, "Median rolling 3-year CAGR"),
+    "rolling_3y_min": ("Roll 3Y min", PERCENT, "Worst rolling 3-year CAGR"),
+    "rolling_3y_positive": ("Roll 3Y +ve", PERCENT, "Share of rolling 3-year windows above zero"),
+    "consistency_overall": ("Win rate", PERCENT, "Rolling 1-year windows beating Nifty 50"),
+    "consistency_upside": ("Win ↑mkt", PERCENT, "Win rate when Nifty 50 rose"),
+    "consistency_downside": ("Win ↓mkt", PERCENT, "Win rate when Nifty 50 fell"),
+    "max_drawdown": ("Max DD", PERCENT, "Worst peak-to-trough fall over five years"),
+    "drawdown_from_high": ("Off high", PERCENT, "Distance below the all-time high today"),
+}
+
+_FORMATS = {
+    "percent": "percent", "z": "%+.2f", "signed1": "%+.1f", "signed2": "%+.2f",
+    "ratio2": "%.2f", "ratio3": "%.3f", "int": "%d",
+}
+
+
+def column_config(keys) -> dict[str, object]:
+    """Streamlit column_config for any subset of the taxonomy."""
+    config: dict[str, object] = {}
+    for key in keys:
+        if key not in COLUMNS:
+            continue
+        label, kind, help_text = COLUMNS[key]
+        common = {"width": "small", "help": help_text or None}
+        if kind == "text":
+            config[key] = st.column_config.TextColumn(label, **common)
+        elif kind == "bool":
+            config[key] = st.column_config.CheckboxColumn(label, **common)
+        elif kind == "spark":
+            config[key] = st.column_config.LineChartColumn(label, **common)
+        else:
+            config[key] = st.column_config.NumberColumn(label, format=_FORMATS[kind], **common)
+    return config
+
+
+def audit_frame(frame: pd.DataFrame, key: str | None = None, height: int = 420) -> None:
+    """Raw model inputs, in the same vocabulary as every other table."""
+    if frame is None or frame.empty:
+        st.caption("Nothing to audit.")
+        return
+    known = [c for c in COLUMNS if c in frame.columns]
+    rest = [c for c in frame.columns if c not in known]
+    st.dataframe(
+        frame[known + rest],
+        column_config=column_config(known),
+        hide_index=True,
+        width="stretch",
+        height=height,
+        key=key,
+    )
+
+
 LOOKBACKS = ("1M", "3M", "6M", "12M")
 
 # This is a relative-strength model: what matters is a sector's return *against*
@@ -93,53 +193,8 @@ def ranked_table(
     ]
     display_cols = [c for c in display_cols if c in view.columns]
 
-    config = {
-        "position": st.column_config.NumberColumn("#", width="small", help="Order under the selected lookback"),
-        "exposure": st.column_config.TextColumn("Exposure", width="medium", pinned=True),
-        "category": st.column_config.TextColumn("Type", width="small"),
-        "consistency_overall": st.column_config.NumberColumn(
-            "Win rate", format="percent", width="small",
-            help="Share of rolling 1-year windows this exposure beat Nifty 50. "
-                 "A high rank with a low win rate is a recent move, not durable leadership.",
-        ),
-        "consistency_downside": st.column_config.NumberColumn(
-            "Win ↓mkt", format="percent", width="small",
-            help="Win rate in the windows where Nifty 50 itself fell. Separates real "
-                 "sector strength from leveraged beta.",
-        ),
-        "alpha": st.column_config.NumberColumn(
-            "Alpha", format="percent", width="small",
-            help="Annualised Jensen's alpha vs Nifty 50, after beta",
-        ),
-        "beta": st.column_config.NumberColumn(
-            "Beta", format="%.2f", width="small", help="Sensitivity to Nifty 50",
-        ),
-        "sharpe_3y": st.column_config.NumberColumn(
-            "Sharpe 3Y", format="%+.2f", width="small", help="3-year Sharpe, risk-free 6.5%",
-        ),
-        "max_drawdown": st.column_config.NumberColumn(
-            "Max DD", format="percent", width="small", help="Worst peak-to-trough fall in 5 years",
-        ),
-        "tradeable": st.column_config.CheckboxColumn(
-            "Buyable", width="small",
-            help="A listed ETF that traded at the last NSE snapshot, or an open-ended index fund",
-        ),
-        "model_action": st.column_config.TextColumn("Action", width="small"),
-        "stage": st.column_config.TextColumn("Stage", width="small"),
-        "momentum_z": st.column_config.NumberColumn(
-            "Mom Z", format="%+.2f", width="small",
-            help="Cross-sectional Z of relative returns across 1M/3M/6M/12M",
-        ),
-        "rs_trend": st.column_config.LineChartColumn(
-            "RS trend", width="small", help="Mansfield relative strength, last 26 weeks",
-        ),
-        "rs_ratio": st.column_config.NumberColumn(
-            "RS ratio", format="%.3f", width="small", help="1.00 = in line with Nifty 50",
-        ),
-        "rs_momentum": st.column_config.NumberColumn(
-            "RS vel", format="%+.1f", width="small", help="13-week change in Mansfield RS",
-        ),
-    }
+    config = column_config(display_cols)
+    # The period columns carry a measure-dependent label, so override just those.
     suffix = " vs N50" if basis == BASIS_RELATIVE else ""
     help_text = (
         "Exposure return minus Nifty 50 over the same window"
@@ -147,9 +202,15 @@ def ranked_table(
         else "Index return over the window"
     )
     for period in LOOKBACKS:
-        config[f"{prefix}{period}"] = st.column_config.NumberColumn(
-            f"{period}{suffix}", format="percent", width="small", help=help_text
-        )
+        key = f"{prefix}{period}"
+        if key in config:
+            config[key] = st.column_config.NumberColumn(
+                f"{period}{suffix}", format="percent", width="small", help=help_text
+            )
+    config["exposure"] = st.column_config.TextColumn("Exposure", width="medium", pinned=True)
+    config["rs_trend"] = st.column_config.LineChartColumn(
+        "RS trend", width="small", help="Mansfield relative strength, last 26 weeks"
+    )
 
     st.dataframe(
         view[display_cols],

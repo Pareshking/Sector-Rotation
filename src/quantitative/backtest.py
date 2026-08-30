@@ -25,10 +25,15 @@ import numpy as np
 import pandas as pd
 
 from src.quantitative.ranking import rank_exposures
+from src.quantitative.relative_strength import mansfield_relative_strength, rs_momentum, rs_stage
 from src.quantitative.returns import LOOKBACK_DAYS
 
 TRADING_DAYS = 252
 MIN_WINDOW_MONTHS = 12
+# How far down the ranking a substitution may reach when the top name cannot be
+# bought. Beyond this the slot goes to cash rather than drifting into names the
+# model never actually favoured.
+DEFAULT_RANK_DEPTH = 3
 
 
 @dataclass
@@ -44,14 +49,78 @@ class BacktestResult:
         return not self.error and not self.monthly.empty
 
 
-def rebalance_dates(index: pd.DatetimeIndex, months: int) -> list[pd.Timestamp]:
-    """Last available trading day of each month, covering ``months`` + 1 points."""
+def rebalance_dates(index: pd.DatetimeIndex, months: int, hold_months: int = 1) -> list[pd.Timestamp]:
+    """Period boundaries: the last trading day of every ``hold_months``-th month.
+
+    ``months`` is the length of the test; ``hold_months`` is how long a decision
+    is left alone before it is revisited.
+    """
     if len(index) == 0:
         return []
     frame = pd.Series(index, index=index)
     month_ends = frame.groupby([index.year, index.month]).max().sort_values()
     dates = list(pd.DatetimeIndex(month_ends.to_numpy()))
-    return dates[-(months + 1):] if len(dates) > months else dates
+    window = dates[-(months + 1):] if len(dates) > months else dates
+    hold = max(int(hold_months), 1)
+    if hold == 1:
+        return window
+    # Step backwards from the most recent month end so the final period is whole.
+    stepped = window[::-1][::hold][::-1]
+    return stepped
+
+
+def signal_panel(prices: pd.DataFrame, benchmark: pd.Series) -> dict[str, pd.DataFrame]:
+    """Mansfield RS ratio and velocity for every date, per exposure.
+
+    Both inputs are backward-looking by construction — a 52-week rolling mean
+    and a 13-week difference — so reading row ``t`` uses only data available on
+    day ``t``. Computing the series once and indexing into it is point-in-time
+    safe and far cheaper than recomputing at every rebalance.
+    """
+    out: dict[str, pd.DataFrame] = {}
+    for column in prices.columns:
+        mrs = mansfield_relative_strength(prices[column], benchmark)
+        if mrs.dropna().empty:
+            continue
+        frame = pd.DataFrame({"ratio": 1.0 + mrs / 100.0, "velocity": rs_momentum(mrs)}).dropna()
+        if not frame.empty:
+            out[column] = frame
+    return out
+
+
+def _signal_at(panel: dict[str, pd.DataFrame], exposure_id: str, asof: pd.Timestamp):
+    frame = panel.get(exposure_id)
+    if frame is None:
+        return None
+    window = frame.loc[:asof]
+    if window.empty:
+        return None
+    row = window.iloc[-1]
+    return float(row["ratio"]), float(row["velocity"])
+
+
+def investable_from(
+    vehicle_prices: pd.DataFrame, vehicles_by_exposure: dict[str, list[str]] | None
+) -> dict[str, pd.Timestamp]:
+    """First date each exposure had a vehicle you could actually have bought.
+
+    Investability is judged from the vehicle's own price history, not from the
+    fact that it exists today. Most of these ETFs and index funds launched in
+    2024-25; treating them as available in 2021 would be look-ahead of the worst
+    kind — the backtest would buy instruments that did not exist yet.
+    """
+    starts: dict[str, pd.Timestamp] = {}
+    if vehicle_prices is None or vehicle_prices.empty:
+        return starts
+    for exposure_id, keys in (vehicles_by_exposure or {}).items():
+        firsts = [
+            vehicle_prices[key].dropna().index.min()
+            for key in keys
+            if key in vehicle_prices.columns and not vehicle_prices[key].dropna().empty
+        ]
+        if firsts:
+            starts[str(exposure_id)] = min(firsts)
+    return starts
 
 
 def _eligible(prices: pd.DataFrame, asof: pd.Timestamp) -> list[str]:
@@ -66,10 +135,26 @@ def run_backtest(
     benchmark: pd.Series,
     top_n: int = 2,
     months: int = 12,
+    hold_months: int = 1,
     absolute_filter: bool = True,
     absolute_lookback: str = "12M",
+    investable_only: bool = False,
+    require_buy: bool = False,
+    max_rank_depth: int = DEFAULT_RANK_DEPTH,
+    vehicle_prices: pd.DataFrame | None = None,
+    vehicles_by_exposure: dict[str, list[str]] | None = None,
 ) -> BacktestResult:
-    """Rank monthly, hold the top ``top_n`` exposures equally weighted."""
+    """Rank periodically, hold the top ``top_n`` exposures equally weighted.
+
+    ``investable_only`` restricts each pick to exposures that had a buyable
+    vehicle *on that date*, judged from the vehicle's own price history rather
+    than from the fact that it exists today. ``require_buy`` additionally
+    demands the exposure satisfy the live BUY rule. When a top-ranked name
+    fails either test the next one is taken, but never past ``max_rank_depth``
+    — beyond that the slot goes to cash rather than drifting into names the
+    model never favoured.
+    """
+    hold_months = max(int(hold_months), 1)
     if months < MIN_WINDOW_MONTHS:
         return BacktestResult(error=f"The backtest window must be at least {MIN_WINDOW_MONTHS} months.")
     if prices is None or prices.empty or benchmark is None or benchmark.dropna().empty:
@@ -80,16 +165,27 @@ def run_backtest(
     common = prices.index.intersection(benchmark.index)
     prices, benchmark = prices.loc[common], benchmark.loc[common]
 
-    dates = rebalance_dates(prices.index, months)
-    if len(dates) < MIN_WINDOW_MONTHS + 1:
+    dates = rebalance_dates(prices.index, months, hold_months)
+    periods_needed = max(MIN_WINDOW_MONTHS // hold_months, 1)
+    if len(dates) < periods_needed + 1:
         return BacktestResult(
             error=(
-                f"Only {max(len(dates) - 1, 0)} complete months of overlapping history are "
-                f"available; {MIN_WINDOW_MONTHS} are required."
+                f"Only {max(len(dates) - 1, 0)} complete {hold_months}-month periods of "
+                f"overlapping history are available; {periods_needed} are required."
             )
         )
 
+    signals = signal_panel(prices, benchmark) if require_buy else {}
+    starts = (
+        investable_from(vehicle_prices, vehicles_by_exposure) if investable_only else {}
+    )
     absolute_days = LOOKBACK_DAYS.get(absolute_lookback, LOOKBACK_DAYS["12M"])
+    # The depth cap exists so a name the model never favoured cannot be bought
+    # just because everything above it was unbuyable. It applies only to the
+    # constrained modes; plain full-universe scanning is unbounded, as before.
+    constrained = investable_only or require_buy
+    depth = max(int(max_rank_depth), int(top_n)) if constrained else len(prices.columns)
+
     rows: list[dict[str, object]] = []
     universe: dict[pd.Timestamp, int] = {}
     previous: set[str] = set()
@@ -105,17 +201,40 @@ def run_backtest(
         ranked = ranked[ranked["momentum_z"].notna()].sort_values("momentum_z", ascending=False)
 
         picks: list[str] = []
-        for exposure_id in ranked.index:
-            if len(picks) >= top_n:
+        skipped: list[str] = []
+        for position, exposure_id in enumerate(ranked.index, start=1):
+            if len(picks) >= top_n or position > depth:
                 break
+            exposure_id = str(exposure_id)
             series = prices[exposure_id].loc[:start].dropna()
+
+            if investable_only:
+                first = starts.get(exposure_id)
+                if first is None or first > start:
+                    skipped.append(f"{exposure_id}:no vehicle")
+                    continue
+
+            if require_buy:
+                signal = _signal_at(signals, exposure_id, start)
+                if signal is None:
+                    skipped.append(f"{exposure_id}:no signal")
+                    continue
+                ratio, velocity = signal
+                stage = rs_stage(ratio, velocity)
+                if not (stage == "Leading" and ratio > 1.0 and velocity > 0):
+                    skipped.append(f"{exposure_id}:not BUY")
+                    continue
+
             if absolute_filter:
                 if len(series) <= absolute_days:
+                    skipped.append(f"{exposure_id}:short history")
                     continue
                 trailing = series.iloc[-1] / series.iloc[-absolute_days - 1] - 1.0
                 if trailing <= 0:
+                    skipped.append(f"{exposure_id}:negative absolute")
                     continue
-            picks.append(str(exposure_id))
+
+            picks.append(exposure_id)
 
         held = prices.loc[[start, end], picks] if picks else pd.DataFrame()
         realised = {}
@@ -126,8 +245,7 @@ def run_backtest(
             realised[exposure_id] = float(values.iloc[1] / values.iloc[0] - 1.0)
 
         cash_slots = top_n - len(realised)
-        gross = sum(realised.values())
-        strategy_return = gross / top_n if top_n else 0.0
+        strategy_return = sum(realised.values()) / top_n if top_n else 0.0
 
         bench_start, bench_end = benchmark.loc[start], benchmark.loc[end]
         benchmark_return = float(bench_end / bench_start - 1.0) if bench_start > 0 else np.nan
@@ -145,6 +263,7 @@ def run_backtest(
                 "excess_return": strategy_return - benchmark_return,
                 "turnover": len(current ^ previous) / (2 * top_n) if top_n else 0.0,
                 "universe": len(candidates),
+                "skipped": "; ".join(skipped[:4]),
                 **{f"holding_{i + 1}": name for i, name in enumerate(realised)},
                 **{f"holding_{i + 1}_return": value for i, value in enumerate(realised.values())},
             }
@@ -153,7 +272,7 @@ def run_backtest(
 
     monthly = pd.DataFrame(rows)
     if monthly.empty:
-        return BacktestResult(error="No month produced a valid holding period.")
+        return BacktestResult(error="No period produced a valid holding.")
 
     equity = pd.DataFrame(
         {
@@ -165,10 +284,15 @@ def run_backtest(
         }
     ).set_index("date")
 
+    stats = _stats(monthly, equity, hold_months)
+    stats["requested_months"] = float(months)
+    # The first rebalances produce nothing: no exposure has the 252 days of
+    # history the ranking needs, so the window's opening year is warm-up.
+    stats["warmup_months"] = float(max(months - stats["months"], 0.0))
     return BacktestResult(
         monthly=monthly,
         equity=equity,
-        stats=_stats(monthly, equity),
+        stats=stats,
         universe_size=pd.Series(universe).sort_index(),
     )
 
@@ -177,19 +301,22 @@ def _max_drawdown(curve: pd.Series) -> float:
     return float((curve / curve.cummax() - 1.0).min())
 
 
-def _stats(monthly: pd.DataFrame, equity: pd.DataFrame) -> dict[str, float]:
+def _stats(monthly: pd.DataFrame, equity: pd.DataFrame, hold_months: int = 1) -> dict[str, float]:
     strategy = monthly["strategy_return"].astype(float)
     benchmark = monthly["benchmark_return"].astype(float)
     n = len(strategy)
-    years = n / 12.0
+    periods_per_year = 12.0 / max(hold_months, 1)
+    years = n / periods_per_year
     total_s = float(equity["strategy"].iloc[-1] / 100.0 - 1.0)
     total_b = float(equity["benchmark"].iloc[-1] / 100.0 - 1.0)
-    vol_s = float(strategy.std(ddof=0) * np.sqrt(12)) if n > 1 else float("nan")
-    vol_b = float(benchmark.std(ddof=0) * np.sqrt(12)) if n > 1 else float("nan")
+    vol_s = float(strategy.std(ddof=0) * np.sqrt(periods_per_year)) if n > 1 else float("nan")
+    vol_b = float(benchmark.std(ddof=0) * np.sqrt(periods_per_year)) if n > 1 else float("nan")
     cagr_s = float((1 + total_s) ** (1 / years) - 1) if years > 0 and total_s > -1 else float("nan")
     cagr_b = float((1 + total_b) ** (1 / years) - 1) if years > 0 and total_b > -1 else float("nan")
     return {
-        "months": float(n),
+        "periods": float(n),
+        "months": float(n * max(hold_months, 1)),
+        "hold_months": float(hold_months),
         "total_return": total_s,
         "benchmark_total_return": total_b,
         "excess_total": total_s - total_b,

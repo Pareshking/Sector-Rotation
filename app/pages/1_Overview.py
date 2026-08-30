@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, stage_distribution
 from app.components.metrics import action_counts, data_health_banner
-from app.components.tables import BASES, BASIS_RELATIVE, action_board, ranked_table
+from app.components.tables import BASES, BASIS_RELATIVE, action_board, audit_frame, ranked_table
 from app.components.theme import (
     inject_theme,
     kpi_strip,
@@ -134,7 +134,7 @@ if not unavailable.empty:
             st.write(f"• {row.exposure} — {getattr(row, 'decision_reason', 'History unavailable.')}")
 
 with st.expander("Model inputs · audit", expanded=False):
-    st.dataframe(decisions, width="stretch", hide_index=True)
+    audit_frame(decisions, key="overview_audit")
 
 st.caption(
     "A quantitative decision aid, not advice. Verify the underlying ETF, liquidity, tracking "

@@ -44,7 +44,7 @@ kpi_strip(
     ]
 )
 
-section("Momentum leaderboard", "Composite Z-score, coloured by rotation stage")
+section("Momentum leaderboard", "Composite Z-score · 0 is the universe average, not zero return")
 stage_legend()
 st.plotly_chart(momentum_bar(eligible, limit=21), width="stretch", config=CHART_CONFIG)
 

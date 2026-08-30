@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.charts import CHART_CONFIG, returns_heatmap
-from app.components.tables import BASES, BASIS_RELATIVE, ranked_table
+from app.components.tables import BASES, BASIS_RELATIVE, audit_frame, ranked_table
 from app.components.theme import inject_theme, kpi_strip, note, page_header, section
 from app.data import load_decisions, load_rs
 
@@ -124,4 +124,4 @@ section("Return map", "Selection returns across every horizon")
 st.plotly_chart(returns_heatmap(frame, limit=25), width="stretch", config=CHART_CONFIG)
 
 with st.expander("Model inputs · audit", expanded=False):
-    st.dataframe(frame, width="stretch", hide_index=True)
+    audit_frame(frame, key="screener_audit")

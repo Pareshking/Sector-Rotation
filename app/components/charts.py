@@ -61,29 +61,51 @@ def _stage_colour(stage: object) -> str:
 # ranking + returns
 # --------------------------------------------------------------------------- #
 def momentum_bar(frame: pd.DataFrame, limit: int = 16, height: int | None = None) -> go.Figure:
+    """Composite momentum Z-score, coloured by rotation stage.
+
+    A Z-score is standardised to a mean of exactly zero, so roughly half the
+    universe sits below the line by construction. A bar pointing left means
+    *below the universe average*, not a loss — several of those exposures are up
+    on the period. The axis and the hover both say so, because a negative bar
+    reads as a loss otherwise.
+    """
     data = frame.sort_values("momentum_z", ascending=False).head(limit).sort_values("momentum_z")
     fig = go.Figure()
     if data.empty:
         return _finish(fig, height or 320)
+
+    has_returns = {"return_3M", "relative_3M"}.issubset(data.columns)
+    custom = (
+        data[["stage", "model_action", "return_3M", "relative_3M"]].to_numpy()
+        if has_returns and "model_action" in data.columns
+        else data[["stage", "stage"]].to_numpy()
+    )
+    hover = (
+        "<b>%{y}</b><br>Momentum Z %{x:+.2f} vs universe average"
+        "<br>%{customdata[0]} · %{customdata[1]}"
+        "<br>3M return %{customdata[2]:.2%}<br>3M vs Nifty 50 %{customdata[3]:+.2%}<extra></extra>"
+        if has_returns and "model_action" in data.columns
+        else "<b>%{y}</b><br>Momentum Z %{x:+.2f} vs universe average<extra></extra>"
+    )
     fig.add_trace(
         go.Bar(
             x=data.momentum_z, y=data.exposure, orientation="h",
             marker=dict(color=[_stage_colour(s) for s in data.stage], line=dict(width=0)),
-            customdata=data[["stage", "model_action"]].to_numpy()
-            if "model_action" in data.columns
-            else data[["stage", "stage"]].to_numpy(),
-            hovertemplate="<b>%{y}</b><br>Momentum Z %{x:+.2f}<br>%{customdata[0]} · %{customdata[1]}<extra></extra>",
-            showlegend=False,
+            customdata=custom, hovertemplate=hover, showlegend=False,
         )
     )
-    fig.add_vline(x=0, line_color="#94A3B8", line_width=1)
+    fig.add_vline(x=0, line_color="#64748B", line_width=1.4)
+    fig.add_annotation(
+        x=0, y=1.0, yref="paper", yanchor="bottom", xanchor="center", showarrow=False,
+        text="universe average", font=dict(size=9.5, color=MUTED), yshift=4,
+    )
     fig.update_layout(
-        xaxis_title="Composite momentum Z-score",
+        xaxis_title="Composite momentum Z-score · 0 = universe average, not zero return",
         xaxis=dict(title_font=dict(size=11, color=MUTED), zeroline=False),
         yaxis=dict(tickfont=dict(size=11, color=INK)),
         bargap=0.3,
     )
-    return _finish(fig, height or max(260, 26 * len(data) + 70))
+    return _finish(fig, height or max(260, 26 * len(data) + 80))
 
 
 def returns_heatmap(frame: pd.DataFrame, limit: int = 20, height: int | None = None) -> go.Figure:
