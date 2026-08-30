@@ -21,7 +21,8 @@ DATA = ROOT / "data" / "processed" / "index_prices.parquet"
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, help="Optional CSV output path")
+    parser.add_argument("--output", type=Path, help="Optional summary CSV output path")
+    parser.add_argument("--decisions-output", type=Path, help="Optional decision-difference CSV output path")
     args = parser.parse_args()
 
     if not DATA.exists():
@@ -33,14 +34,15 @@ def main() -> None:
 
     benchmark = panel["__benchmark__"].dropna()
     prices = panel.drop(columns=["__benchmark__"])
-    rows: list[dict[str, object]] = []
+    summary_rows: list[dict[str, object]] = []
+    decision_rows: list[dict[str, object]] = []
 
     for top_n in (1, 2, 3, 5):
         for months in (12, 24, 36, 60):
             off = run_backtest(prices, benchmark, top_n=top_n, months=months, absolute_filter=False)
             on = run_backtest(prices, benchmark, top_n=top_n, months=months, absolute_filter=True)
             if not off.ok or not on.ok:
-                rows.append(
+                summary_rows.append(
                     {
                         "top_n": top_n,
                         "window_requested": months,
@@ -51,12 +53,37 @@ def main() -> None:
                 )
                 continue
 
-            off_holdings = off.monthly["holdings"].astype(str)
-            on_holdings = on.monthly["holdings"].astype(str)
-            aligned = pd.DataFrame({"off": off_holdings, "on": on_holdings}).reset_index(drop=True)
-            changed = aligned["off"] != aligned["on"]
+            off_monthly = off.monthly.reset_index(drop=True)
+            on_monthly = on.monthly.reset_index(drop=True)
+            aligned = pd.DataFrame(
+                {
+                    "rebalance": off_monthly["rebalance"],
+                    "off_holdings": off_monthly["holdings"].astype(str),
+                    "on_holdings": on_monthly["holdings"].astype(str),
+                    "off_return": off_monthly["strategy_return"],
+                    "on_return": on_monthly["strategy_return"],
+                    "off_cash_slots": off_monthly["cash_slots"],
+                    "on_cash_slots": on_monthly["cash_slots"],
+                }
+            )
+            changed = aligned["off_holdings"] != aligned["on_holdings"]
 
-            rows.extend(
+            for row in aligned.loc[changed].itertuples(index=False):
+                decision_rows.append(
+                    {
+                        "top_n": top_n,
+                        "window_requested": months,
+                        "rebalance": row.rebalance,
+                        "off_holdings": row.off_holdings,
+                        "on_holdings": row.on_holdings,
+                        "off_return": row.off_return,
+                        "on_return": row.on_return,
+                        "off_cash_slots": row.off_cash_slots,
+                        "on_cash_slots": row.on_cash_slots,
+                    }
+                )
+
+            summary_rows.extend(
                 [
                     {
                         "top_n": top_n,
@@ -66,6 +93,7 @@ def main() -> None:
                         "total_return": off.stats["total_return"],
                         "cash_months": int(off.stats["cash_months"]),
                         "avg_turnover": off.stats["avg_turnover"],
+                        "holding_months_different_from_on": int(changed.sum()),
                     },
                     {
                         "top_n": top_n,
@@ -80,11 +108,19 @@ def main() -> None:
                 ]
             )
 
-    result = pd.DataFrame(rows)
-    print(result.to_string(index=False))
+    summary = pd.DataFrame(summary_rows)
+    decisions = pd.DataFrame(decision_rows)
+    print("\n=== SUMMARY ===")
+    print(summary.to_string(index=False))
+    print("\n=== HOLDING DIFFERENCES ===")
+    print(decisions.to_string(index=False) if not decisions.empty else "None")
+
     if args.output:
-        result.to_csv(args.output, index=False)
+        summary.to_csv(args.output, index=False)
         print(f"\nWrote {args.output}")
+    if args.decisions_output:
+        decisions.to_csv(args.decisions_output, index=False)
+        print(f"Wrote {args.decisions_output}")
 
 
 if __name__ == "__main__":
