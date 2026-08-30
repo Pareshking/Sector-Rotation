@@ -73,6 +73,35 @@ for a canonical index history.
 **ETF NAV fallback.** AMFI's historical NAV endpoint backfills bounded date ranges so illiquid
 or unsupported Yahoo series can be recovered without fabricating prices.
 
+## Decision-grade principles
+
+1. **No synthetic benchmark proxies.** A benchmark must represent the declared exposure.
+2. **Source lineage is explicit.** Retrieval mechanism and financial instrument are not
+   conflated. `niftyindices_jugaad` identifies a retrieval route; it is not synthetic data, not
+   an ETF proxy, and not a separately calculated TRI series.
+3. **250 observations is the decision boundary.** A history needs at least 250 observations to
+   enter the decision-grade Mansfield 52-week and 12-month calculations. Nothing is padded,
+   extrapolated, or NaN-filled to satisfy it.
+4. **Exposure comes before ETF.** ETF liquidity, tracking characteristics, or ticker mechanics
+   must not redefine sector strength.
+5. **Catalogue membership is not universe membership.** NSE publishes many ESG, Shariah,
+   corporate-group, factor, size, liquidity and strategy indices that are not automatically
+   sector-rotation exposures. Overlapping variants — an equal-weight alternative, a closely
+   related infrastructure/mobility cut — are not independent economic sectors.
+
+Nearest-category substitution, broad-market substitution and synthetic benchmark construction
+are prohibited.
+
+## Daily production refresh
+
+`.github/workflows/data_pipeline.yml` runs every day at **04:00 IST** (`22:30 UTC` the previous
+calendar day), plus on main updates and manually. It runs the live pipeline and commits changed
+`data/processed/` artifacts back to `main`. The pipeline uses the latest available market
+observation, so weekends and NSE holidays naturally reuse the most recent working-day
+observation. The workflow is concurrency-protected, and the `paths-ignore` rule prevents a
+generated-data commit from recursively launching another run. Generated data is the only
+automatic output; source changes are reviewed separately.
+
 ## Domain model
 
 `Exposure` is the primary object. Each exposure contains a canonical sector/thematic category, a
@@ -208,11 +237,11 @@ To rebuild only the index panel the backtest needs, without touching the ETF art
 python tools/build_index_panel.py
 ```
 
-## GitHub Actions
+## Verification
 
-`.github/workflows/data_pipeline.yml` runs on main updates, manually, and on weekdays. It builds
-the live dataset and commits changed `data/processed/` artifacts. The `paths-ignore` rule
-prevents generated-data commits from recursively launching another pipeline run.
+A successful process exit is not a validation. After a live run, inspect the generated Parquet
+files and `metadata.json` directly: observation counts, date ranges, source lineage, value
+types, missing or short histories, and decision-grade eligibility.
 
 ## Streamlit Community Cloud
 
