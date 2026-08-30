@@ -148,10 +148,25 @@ Rank is a strength ordering. It is never a BUY or SELL gate.
 `Early turn`) so a rank-1 leader whose velocity has turned negative does not look identical to a
 flat neutral name. It does not change any action.
 
-Exposures that resolve to the same underlying index (for example **NBFC** and **Financial
-Services ex Bank**, both `NIFTY FINANCIAL SERVICES EX-BANK`) are flagged with
-`shares_index_with` rather than silently de-duplicated. They occupy two ranks but represent one
-bet.
+Two exposures may not resolve to the same underlying index. `validate_universe` rejects it, and
+the pipeline fails closed, because one index behind two exposures occupies two ranks while
+representing a single bet. `NBFC` and `Financial Services ex Bank` both pointed at
+`NIFTY FINANCIAL SERVICES EX-BANK`; NSE publishes no NBFC index, so the former was remapped to
+`NIFTY MIDSMALL FINANCIAL SERVICES` and renamed **Mid & Small Financials** to describe what that
+index actually is. The UI still carries a `shares_index_with` flag as a backstop for any dataset
+generated before the rule existed.
+
+### Choosing a new exposure
+
+NSE publishes 139 live indices; the rotation universe is 47. A candidate must clear three bars:
+
+1. It is a sector or theme, not a factor, ESG, Shariah, corporate-group, size, liquidity or
+   strategy construction.
+2. It has at least 250 observations of authoritative history.
+3. Its **daily-return correlation with every existing exposure is below 0.90**. This is the test
+   that keeps the universe from filling with variants. `NIFTY TRANSPORTATION & LOGISTICS`
+   (0.990 against Mobility), `NIFTY500 HEALTHCARE` (0.979 against Healthcare) and
+   `NIFTY NON-CYCLICAL CONSUMER` (0.962 against Consumption) were all rejected on this bar.
 
 ## Backtest
 
@@ -201,9 +216,10 @@ value type, resolved index names, ETF coverage and skipped symbols, and validati
 hard-coded key list that omitted the adapter serving every exposure, so Data Health reported
 zero canonical sources while 43 were present.
 
-Known gap: **INFRABEES** has no ingested price history, so ETF coverage reads 31/32. This is an
-ingestion gap in the implementation layer only — the canonical index history behind every
-decision is unaffected, and no signal depends on it.
+ETF coverage moves run to run as Yahoo and MFAPI availability changes; INFRABEES, previously the
+standing gap, now resolves via MFAPI. Any shortfall here is an ingestion gap in the
+implementation layer only — the canonical index history behind every decision is unaffected, and
+no signal depends on it. The Data Health page lists whatever is currently skipped.
 
 ## Local setup
 
@@ -231,11 +247,14 @@ incomplete canonical universe. A five-year window is requested where the source 
 history — "100% coverage" means every configured canonical index has a valid authoritative
 series, not that a newly launched index is backfilled before its inception date.
 
-To rebuild only the index panel the backtest needs, without touching the ETF artifacts:
+Index and ETF ingestion fail independently. To refresh index history alone, reusing the ETF
+artifacts already in `data/processed/` rather than overwriting them with a degraded fetch:
 
 ```bash
-python tools/build_index_panel.py
+python -m pipeline.run_pipeline --mode live --skip-etf
 ```
+
+`metadata.json` records which path ran as `etf_ingestion: refreshed | reused`.
 
 ## Verification
 

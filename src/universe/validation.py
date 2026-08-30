@@ -24,6 +24,14 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
     for item, count in ids.items():
         if count > 1:
             errors.append(f"Duplicate exposure id: {item}")
+    # Two exposures resolving to one index occupy two ranks while representing a
+    # single bet, and the duplication is invisible in the UI. NBFC and Financial
+    # Services ex-Bank shipped this way against NIFTY FINANCIAL SERVICES EX-BANK.
+    benchmarks = Counter(x.benchmark.strip().upper() for x in exposures if x.benchmark.strip())
+    for benchmark, count in benchmarks.items():
+        if count > 1:
+            sharing = sorted(x.id for x in exposures if x.benchmark.strip().upper() == benchmark)
+            errors.append(f"Benchmark {benchmark} is shared by {count} exposures: {', '.join(sharing)}")
     etf_symbols: list[str] = []
     all_aliases: list[str] = []
     for exposure in exposures:

@@ -40,3 +40,30 @@ def test_invalid_nse_symbol_is_rejected() -> None:
     report = validate_universe([exposure])
     assert not report.valid
     assert any("invalid NSE symbol" in error for error in report.errors)
+
+
+def test_two_exposures_may_not_share_one_benchmark_index():
+    """One index behind two exposures is one bet occupying two ranks."""
+    from src.models.exposure import Exposure
+    from src.universe.validation import validate_universe
+
+    report = validate_universe([
+        Exposure(id="nbfc", name="NBFC", category="sector", benchmark="NIFTY FIN EX-BANK"),
+        Exposure(id="fx", name="Fin ex Bank", category="sector", benchmark="nifty fin ex-bank"),
+    ])
+    assert not report.valid
+    assert any("shared by 2 exposures" in e for e in report.errors)
+
+
+def test_the_shipped_universe_has_no_shared_benchmarks():
+    import json
+    from pathlib import Path
+
+    from src.universe.registry import UniverseRegistry
+    from src.universe.validation import validate_universe
+
+    root = Path(__file__).resolve().parents[1]
+    registry = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json")
+    report = validate_universe(registry.all())
+    assert report.valid, report.errors
+    del json

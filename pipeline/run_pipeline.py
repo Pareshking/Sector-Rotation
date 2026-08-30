@@ -128,10 +128,34 @@ def build_fixture(registry, days=1300):
     return pd.DataFrame(columns), benchmark, _etf_frame(registry), etf_prices, health
 
 
-def build_live(registry):
+def _load_existing_etf_artifacts():
+    """Reuse the ETF artifacts already on disk instead of re-downloading them.
+
+    Index and ETF ingestion fail independently: NSE index history can be
+    refreshed when Yahoo/AMFI are unreachable, and re-running the whole pipeline
+    just to pick up an index change would overwrite good ETF data with a
+    degraded fetch.
+    """
+    import pandas as pd
+
+    prices_path = OUTPUT / "etf_prices.parquet"
+    history = pd.read_parquet(prices_path) if prices_path.exists() else pd.DataFrame()
+    metadata_path = OUTPUT / "metadata.json"
+    sources, codes = {}, {}
+    if metadata_path.exists():
+        existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+        sources = existing.get("etf_source_by_symbol", {}) or {}
+        codes = existing.get("resolved_mfapi_scheme_codes", {}) or {}
+    return history, sources, codes
+
+
+def build_live(registry, skip_etf: bool = False):
     exposure_names = {e.id: e.benchmark for e in registry.all()}
     etf_objects = [etf for e in registry.all() for etf in e.etfs]
-    etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
+    if skip_etf:
+        etf_history, etf_sources, resolved_codes = _load_existing_etf_artifacts()
+    else:
+        etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
     prices = download_canonical_indices(
         exposure_names,
         years=5,
@@ -201,7 +225,7 @@ def build_live(registry):
     return prices, benchmark, _etf_frame(registry), etf_history, health
 
 
-def run(mode):
+def run(mode, skip_etf: bool = False):
     registry = UniverseRegistry.from_json(UNIVERSE_PATH)
     report = validate_universe(registry.all())
     if not report.valid:
@@ -209,7 +233,7 @@ def run(mode):
     if mode == "fixture":
         prices, benchmark, etfs, etf_history, health = build_fixture(registry)
     elif mode == "live":
-        prices, benchmark, etfs, etf_history, health = build_live(registry)
+        prices, benchmark, etfs, etf_history, health = build_live(registry, skip_etf=skip_etf)
     else:
         raise ValueError("mode must be fixture or live")
 
@@ -279,6 +303,7 @@ def run(mode):
 
     metadata = {
         "mode": mode,
+        "etf_ingestion": "reused" if (mode == "live" and skip_etf) else "refreshed",
         "benchmark": registry.benchmark_name,
         "benchmark_source": "niftyindices_jugaad",
         "last_updated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
@@ -298,4 +323,10 @@ def run(mode):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build the Sector-Rotation prepared dataset")
     parser.add_argument("--mode", choices=("fixture", "live"), default="fixture")
-    run(parser.parse_args().mode)
+    parser.add_argument(
+        "--skip-etf",
+        action="store_true",
+        help="Refresh index data only, reusing the ETF artifacts already in data/processed.",
+    )
+    args = parser.parse_args()
+    run(args.mode, skip_etf=args.skip_etf)
