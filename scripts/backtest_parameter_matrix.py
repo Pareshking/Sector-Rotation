@@ -13,10 +13,19 @@ from pathlib import Path
 import pandas as pd
 
 from src.quantitative.backtest import run_backtest
+from src.quantitative.returns import LOOKBACK_DAYS
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "processed" / "index_prices.parquet"
+
+
+def _absolute_return(prices: pd.DataFrame, exposure_id: str, asof: pd.Timestamp) -> float | None:
+    series = prices[exposure_id].loc[:asof].dropna()
+    days = LOOKBACK_DAYS["12M"]
+    if len(series) <= days:
+        return None
+    return float(series.iloc[-1] / series.iloc[-days - 1] - 1.0)
 
 
 def main() -> None:
@@ -69,6 +78,12 @@ def main() -> None:
             changed = aligned["off_holdings"] != aligned["on_holdings"]
 
             for row in aligned.loc[changed].itertuples(index=False):
+                off_names = [name.strip() for name in row.off_holdings.split(",") if name.strip() and name != "cash"]
+                on_names = [name.strip() for name in row.on_holdings.split(",") if name.strip() and name != "cash"]
+                off_only = [name for name in off_names if name not in on_names]
+                absolute_returns = [
+                    _absolute_return(prices, name, row.rebalance) for name in off_only
+                ]
                 decision_rows.append(
                     {
                         "top_n": top_n,
@@ -76,6 +91,10 @@ def main() -> None:
                         "rebalance": row.rebalance,
                         "off_holdings": row.off_holdings,
                         "on_holdings": row.on_holdings,
+                        "off_only_rejected_by_filter": ", ".join(off_only),
+                        "off_only_12m_absolute_returns": ", ".join(
+                            "NA" if value is None else f"{value:.6f}" for value in absolute_returns
+                        ),
                         "off_return": row.off_return,
                         "on_return": row.on_return,
                         "off_cash_slots": row.off_cash_slots,
