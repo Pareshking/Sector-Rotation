@@ -38,7 +38,12 @@ jobs:
       - name: Run live pipeline
         env:
           PIPELINE_MODE: live
-        run: python -m pipeline.run_pipeline --mode live
+        # --strict: an error-level quality alert (coverage regression, a
+        # dropped canonical series, a truncated history) must stop the run
+        # here. Without it the checks only observed and never enforced —
+        # metadata.json still wrote a report, but a bad dataset committed
+        # anyway. A red run tonight beats a wrong number on the dashboard.
+        run: python -m pipeline.run_pipeline --mode live --strict
       - name: Detect decision changes
         id: alerts
         continue-on-error: true

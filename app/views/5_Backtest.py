@@ -17,11 +17,13 @@ from app.data import load_backtest, load_decisions, load_index_panel, load_sensi
 inject_theme()
 mobile_nav("Backtest")
 page_header(
-    "Out of Sample",
+    "Walk-Forward Backtest",
     "Backtest",
     "Rank the universe at each month end, hold the top exposures for the next month, repeat. "
     "Ranking uses only data available on the rebalance date, and is computed by the same code "
-    "that produces the live dashboard.",
+    "that produces the live dashboard. This is point-in-time, not out-of-sample: the weighting, "
+    "top-N and rank depth below were all chosen by looking at this same window, so no result here "
+    "is evidence in the way an untouched holdout would be.",
 )
 
 panel, benchmark = load_index_panel()

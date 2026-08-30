@@ -1,0 +1,46 @@
+name: Data Freshness Watchdog
+
+on:
+  # Independent of the data pipeline's own schedule and success, on purpose:
+  # this catches the case where the pipeline itself stops running or keeps
+  # timing out. It only reads what is already committed in the repo.
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check dataset age
+        id: freshness
+        run: python3 tools/check_freshness.py
+      - name: Open an issue if stale
+        if: failure() && steps.freshness.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One open issue per stale episode, not one every 6 hours while it persists.
+          existing=$(gh issue list --label data-quality --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing is already open for this; not creating another."
+            exit 0
+          fi
+          python3 tools/check_freshness.py > freshness.txt 2>&1 || true
+          {
+            echo "The published dataset has not refreshed in time. Details:"
+            echo
+            cat freshness.txt
+            echo
+            echo "[Open the dashboard](https://dualmomentum.streamlit.app) · [Data Pipeline runs](../../actions/workflows/data_pipeline.yml)"
+          } > body.md
+          gh issue create --title "Data is stale — $(date -u +'%d %b %Y %H:%M') UTC" --body-file body.md --label data-quality 2>/dev/null \
+            || gh issue create --title "Data is stale — $(date -u +'%d %b %Y %H:%M') UTC" --body-file body.md

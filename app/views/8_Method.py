@@ -161,10 +161,22 @@ Three universes, each stricter than the last:
 Investability is judged from each vehicle's own price history, never from today's lineup — most
 of these funds launched in 2024–25, so treating them as available in 2021 would be look-ahead of
 the worst kind. When a top pick fails a test the next is taken, down to a set rank; past that the
-slot goes to cash.
+slot goes to cash. **All indices** still ranks the full 47-exposure universe at every historical
+date, including exposures whose fund did not exist yet — it measures the signal, not a portfolio
+anyone could have held, precisely because it skips this gate.
 
 **The history window is not the return window.** The ranking needs a full 12-month history before
 it can choose anything, so a 60-month window yields 48 months of returns.
+
+**A rebalance transacts at the same close used to rank it.** The signal is computed from prices
+through the rebalance date, and the return is also measured from that date's close. A real order
+placed after seeing that close fills at least one session later, so this is a small, favourable
+timing assumption — modest at a monthly cadence, but real.
+
+**"Buyable" means a fund existed, not that it was easy to trade.** Investability only checks price
+history; it does not check historical liquidity, spread, AUM, or whether an index fund was even
+open to subscriptions on that date. A rank-3 substitution in 2022 could have been in a much
+thinner fund than the same name would be today.
 
 **Transaction costs are deliberately zero.** No brokerage, spread, STT, expense or tax, so a real
 book earns less — and more so at higher turnover.
