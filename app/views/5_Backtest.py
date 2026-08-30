@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, equity_curve, monthly_excess
 from app.components.theme import fmt_pct, inject_theme, kpi_strip, note, page_header, section
-from app.data import load_backtest, load_decisions, load_index_panel
+from app.data import load_backtest, load_decisions, load_index_panel, load_sensitivity
 
 inject_theme()
 page_header(
@@ -201,6 +201,89 @@ st.plotly_chart(equity_curve(result.equity), width="stretch", config=CHART_CONFI
 
 section("Monthly excess return", "Green months beat Nifty 50; hover for the holdings")
 st.plotly_chart(monthly_excess(_named(result.monthly)), width="stretch", config=CHART_CONFIG)
+
+section("Early versus recent", "The blended figure hides which half it came from")
+from src.quantitative.backtest import period_split
+
+split = period_split(result)
+if not split.empty:
+    LABELS = {"early": "Early", "recent": "Recent"}
+    st.dataframe(
+        split.assign(
+            Half=split["half"].map(LABELS),
+            Period=[f"{a:%b %Y} – {b:%b %Y}" for a, b in zip(split["from"], split["to"])],
+        )[["Half", "Period", "periods", "strategy", "benchmark", "excess", "cash_periods"]]
+        .rename(columns={"periods": "Periods", "strategy": "Strategy",
+                         "benchmark": "Nifty 50", "excess": "Excess",
+                         "cash_periods": "Periods with cash"}),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Half": st.column_config.TextColumn(width="small"),
+            "Period": st.column_config.TextColumn(width="medium"),
+            "Periods": st.column_config.NumberColumn(width="small"),
+            "Strategy": st.column_config.NumberColumn(format="percent", width="small"),
+            "Nifty 50": st.column_config.NumberColumn(format="percent", width="small"),
+            "Excess": st.column_config.NumberColumn(format="percent", width="small"),
+            "Periods with cash": st.column_config.NumberColumn(
+                format="percent", width="small",
+                help="Share of periods where at least one slot could not be filled",
+            ),
+        },
+    )
+    if len(split) == 2 and investable_only:
+        early, recent = split.iloc[0], split.iloc[1]
+        note(
+            f"<b>The two halves say different things.</b> Early on, {early['cash_periods']:.0%} of "
+            f"periods left a slot in cash — only a dozen exposures had a fund at all — and the "
+            f"strategy trailed by {abs(early['excess']):.1%}. Recently, with cash down to "
+            f"{recent['cash_periods']:.0%}, it is {recent['excess']:+.1%} against Nifty 50. "
+            "The early stretch mostly measures a market where sector funds barely existed, not a "
+            "failing signal — but the recent stretch is only "
+            f"{int(recent['periods'])} periods, far too few to call an edge.",
+            tone="amber",
+        )
+
+section("Does the answer depend on the weighting?", "Same test, different composite weights")
+# Six full backtests: run it only when asked, not on every page load.
+if not st.toggle("Test six weightings", value=False, key="bt_sensitivity"):
+    st.caption(
+        "Runs the same backtest under six composite weightings to show how much of the result "
+        "is the strategy and how much is the parameter."
+    )
+    st.stop()
+
+sensitivity = load_sensitivity(
+    top_n=top_n or 2, months=months or 60, hold_months=hold_months or 1,
+    absolute_filter=absolute_filter, investable_only=investable_only,
+    require_buy=require_buy, max_rank_depth=max_rank_depth or 3,
+)
+if sensitivity.empty:
+    note("Not enough history to test alternative weightings.")
+else:
+    st.dataframe(
+        sensitivity.rename(columns={
+            "weighting": "Weighting", "total_return": "Strategy", "excess": "Excess",
+            "max_drawdown": "Max DD", "hit_rate": "Hit rate", "turnover": "Turnover"}),
+        hide_index=True, width="stretch",
+        column_config={
+            "Weighting": st.column_config.TextColumn(width="medium"),
+            "Strategy": st.column_config.NumberColumn(format="percent", width="small"),
+            "Excess": st.column_config.NumberColumn(format="percent", width="small"),
+            "Max DD": st.column_config.NumberColumn(format="percent", width="small"),
+            "Hit rate": st.column_config.NumberColumn(format="percent", width="small"),
+            "Turnover": st.column_config.NumberColumn(format="percent", width="small"),
+        },
+    )
+    spread = float(sensitivity["excess"].max() - sensitivity["excess"].min())
+    note(
+        f"<b>The weighting moves the answer by {spread:.0%}.</b> That spread comes from a "
+        "parameter choice, not from the strategy — so treat any single row as noise, and do not "
+        "pick the best one. Choosing a weighting because it won this sample is fitting "
+        "the sample. The live board uses equal weights because that assumes nothing about which "
+        "horizon predicts best, which is the honest default when the record is this short.",
+        tone="amber",
+    )
 
 section("Month-by-month record")
 ledger = _named(result.monthly)

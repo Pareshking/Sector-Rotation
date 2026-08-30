@@ -143,6 +143,7 @@ def run_backtest(
     max_rank_depth: int = DEFAULT_RANK_DEPTH,
     vehicle_prices: pd.DataFrame | None = None,
     vehicles_by_exposure: dict[str, list[str]] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> BacktestResult:
     """Rank periodically, hold the top ``top_n`` exposures equally weighted.
 
@@ -197,7 +198,7 @@ def run_backtest(
             continue
 
         window = prices.loc[:start, candidates]
-        ranked = rank_exposures(window, benchmark.loc[:start])
+        ranked = rank_exposures(window, benchmark.loc[:start], weights=weights)
         ranked = ranked[ranked["momentum_z"].notna()].sort_values("momentum_z", ascending=False)
 
         picks: list[str] = []
@@ -334,3 +335,68 @@ def _stats(monthly: pd.DataFrame, equity: pd.DataFrame, hold_months: int = 1) ->
         "avg_turnover": float(monthly["turnover"].mean()),
         "cash_months": float((monthly["cash_slots"] > 0).sum()),
     }
+
+
+def period_split(result: BacktestResult, boundary: str = "2025-01-01") -> pd.DataFrame:
+    """Split the record either side of a date and compound each half.
+
+    A single headline figure hides the thing that matters most here: the early
+    years had almost nothing to buy, so a poor blended number can describe a
+    strategy that was mostly in cash rather than one that was wrong.
+    """
+    if not result.ok:
+        return pd.DataFrame()
+    frame = result.monthly.copy()
+    cut = pd.Timestamp(boundary)
+    frame["half"] = np.where(pd.to_datetime(frame["period_end"]) < cut, "early", "recent")
+    rows = []
+    for label, group in frame.groupby("half", sort=False):
+        if group.empty:
+            continue
+        strategy = float((1 + group["strategy_return"]).prod() - 1)
+        bench = float((1 + group["benchmark_return"]).prod() - 1)
+        rows.append(
+            {
+                "half": label,
+                "from": pd.to_datetime(group["period_end"]).min(),
+                "to": pd.to_datetime(group["period_end"]).max(),
+                "periods": int(len(group)),
+                "strategy": strategy,
+                "benchmark": bench,
+                "excess": strategy - bench,
+                "cash_periods": float((group["cash_slots"] > 0).mean()),
+                "avg_universe": float(group["universe"].mean()),
+            }
+        )
+    order = {"early": 0, "recent": 1}
+    return pd.DataFrame(rows).sort_values("half", key=lambda s: s.map(order), ignore_index=True)
+
+
+def weight_sensitivity(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    schemes: dict[str, dict[str, float]],
+    **kwargs,
+) -> pd.DataFrame:
+    """Run the same test under several weightings.
+
+    If the answer swings wildly across reasonable weightings, the result is a
+    property of the parameter rather than of the strategy — and picking the best
+    row is fitting noise. This exists to make that visible, not to choose.
+    """
+    rows = []
+    for label, weights in schemes.items():
+        result = run_backtest(prices, benchmark, weights=weights, **kwargs)
+        if not result.ok:
+            continue
+        rows.append(
+            {
+                "weighting": label,
+                "total_return": result.stats["total_return"],
+                "excess": result.stats["excess_total"],
+                "max_drawdown": result.stats["max_drawdown"],
+                "hit_rate": result.stats["hit_rate"],
+                "turnover": result.stats["avg_turnover"],
+            }
+        )
+    return pd.DataFrame(rows)

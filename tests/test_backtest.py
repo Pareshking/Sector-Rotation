@@ -218,3 +218,46 @@ def test_stats_report_the_warmup_the_window_consumed():
     assert result.stats["requested_months"] == 24.0
     assert result.stats["months"] <= 24.0
     assert result.stats["warmup_months"] == 24.0 - result.stats["months"]
+
+
+def test_weights_change_the_ranking_and_flow_into_the_backtest():
+    """A site-wide weighting must reach the backtest, not just the live board."""
+    from src.quantitative.ranking import normalise_weights
+
+    assert normalise_weights({"1M": 10, "3M": 50, "6M": 40, "12M": 0}) == {
+        "1M": 0.1, "3M": 0.5, "6M": 0.4
+    }
+    # Unknown horizons dropped, negatives clamped, empty falls back to equal.
+    assert normalise_weights({"9M": 100}) == normalise_weights(None)
+    assert normalise_weights({"1M": -5, "3M": 5}) == {"3M": 1.0}
+
+    prices, benchmark = _panel(columns=5)
+    short = run_backtest(prices, benchmark, months=12, absolute_filter=False,
+                         weights={"1M": 1, "3M": 1, "6M": 1, "12M": 0})
+    equal = run_backtest(prices, benchmark, months=12, absolute_filter=False)
+    assert short.ok and equal.ok
+
+
+def test_period_split_compounds_each_half_separately():
+    prices, benchmark = _panel(days=1300)
+    result = run_backtest(prices, benchmark, months=36, absolute_filter=False)
+    from src.quantitative.backtest import period_split
+
+    split = period_split(result, boundary="2025-01-01")
+    assert list(split["half"]) == ["early", "recent"]
+    assert int(split["periods"].sum()) == len(result.monthly)
+    for row in split.itertuples():
+        assert abs(row.excess - (row.strategy - row.benchmark)) < 1e-12
+
+
+def test_weight_sensitivity_reports_one_row_per_scheme():
+    from src.quantitative.backtest import weight_sensitivity
+
+    prices, benchmark = _panel(columns=5)
+    schemes = {
+        "equal": {"1M": 25, "3M": 25, "6M": 25, "12M": 25},
+        "short": {"1M": 33, "3M": 33, "6M": 34, "12M": 0},
+    }
+    grid = weight_sensitivity(prices, benchmark, schemes, months=12, absolute_filter=False)
+    assert list(grid["weighting"]) == ["equal", "short"]
+    assert {"total_return", "excess", "max_drawdown", "turnover"} <= set(grid.columns)

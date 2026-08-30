@@ -13,7 +13,7 @@ from src.data.index_data import download_benchmark, download_canonical_indices
 from src.data.nse_etf import fetch_etf_snapshot, merge_snapshot
 from src.quantitative.analytics import analyse_exposure
 from src.quantitative.quality import check_dataset
-from src.quantitative.ranking import rank_exposures
+from src.quantitative.ranking import normalise_weights, rank_exposures
 from src.quantitative.relative_strength import (
     mansfield_relative_strength,
     rs_momentum,
@@ -277,7 +277,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
     if prices.empty:
         raise RuntimeError("No overlapping authoritative benchmark/exposure history was downloaded")
 
-    rankings = rank_exposures(prices, benchmark)
+    rankings = rank_exposures(prices, benchmark, weights=registry.momentum_weights)
     summary_rows = []
     rs_series = {}
     for exposure in registry.all():
@@ -344,6 +344,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
         "mode": mode,
         "etf_ingestion": "reused" if (mode == "live" and skip_etf) else "refreshed",
         "benchmark": registry.benchmark_name,
+        "momentum_weights": normalise_weights(registry.momentum_weights),
         "benchmark_source": "niftyindices_jugaad",
         "last_updated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "observations": int(len(prices)),

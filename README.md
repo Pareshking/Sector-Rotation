@@ -278,6 +278,29 @@ Nearly all the apparent edge is in the gap between those rows. Read the investab
 
 **Holding period** is selectable (1, 2, 3 or 6 months) and is separate from the history window.
 
+**Early versus recent.** The blended figure hides which half it came from, and here the halves
+disagree completely:
+
+| | Strategy | Nifty 50 | Excess | Periods with cash |
+| --- | --- | --- | --- | --- |
+| Sep 2022 – Dec 2024 | +19.2% | +36.3% | **−17.1%** | 86% |
+| Jan 2025 – Aug 2026 | +20.4% | +4.5% | **+15.9%** | 15% |
+
+Only 12 of 47 exposures had a fund in Aug 2021, against 34 today, so the early stretch mostly
+measures a market where sector funds barely existed rather than a failing signal. The recent
+stretch is 20 periods — far too few to call an edge. The page shows both.
+
+**Composite weights are configurable** in `data/universe/universe.json → momentum_weights`, and
+the pipeline applies them to the board and the backtest identically, so the two can never
+disagree about what "rank 1" means. The default is equal weight across 1M/3M/6M/12M: a neutral
+prior that assumes nothing about which horizon predicts best, which is the honest default when
+the record is this short.
+
+**Do not tune them on this sample.** Running the same 48 months under six reasonable weightings
+moves the excess return by roughly 30 percentage points — a swing that comes from the parameter,
+not the strategy. Picking the best row is fitting noise. The Backtest page runs that grid on
+demand so the fragility is visible rather than hidden.
+
 **The history window is not the return window.** The ranking needs a full 12-month history
 before it can pick anything, so a 60-month window yields 48 months of returns; the opening year
 is warm-up. The page states both, and every statistic is measured over the months that actually

@@ -4,6 +4,24 @@ import pandas as pd
 
 from .returns import LOOKBACK_DAYS, dual_momentum
 
+# How much each horizon contributes to the composite momentum score. Equal
+# weight is the neutral prior: it assumes nothing about which horizon predicts
+# best, which is the honest default when the sample is too short to tell.
+# Changing these changes every ranking in the app *and* the backtest, so the
+# live board and the test can never disagree about what "rank 1" means.
+DEFAULT_WEIGHTS: dict[str, float] = {"1M": 0.25, "3M": 0.25, "6M": 0.25, "12M": 0.25}
+
+
+def normalise_weights(weights: dict[str, float] | None) -> dict[str, float]:
+    """Drop unknown horizons, clamp negatives, and rescale to sum to 1."""
+    if not weights:
+        return dict(DEFAULT_WEIGHTS)
+    clean = {k: max(float(v), 0.0) for k, v in weights.items() if k in LOOKBACK_DAYS}
+    total = sum(clean.values())
+    if total <= 0:
+        return dict(DEFAULT_WEIGHTS)
+    return {k: v / total for k, v in clean.items() if v > 0}
+
 
 def cross_sectional_zscore(values: pd.Series) -> pd.Series:
     clean = values.astype(float)
@@ -18,7 +36,11 @@ def percentile_rank(values: pd.Series) -> pd.Series:
     return values.rank(pct=True, method="average") * 100.0
 
 
-def rank_exposures(prices: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
+def rank_exposures(
+    prices: pd.DataFrame,
+    benchmark: pd.Series,
+    weights: dict[str, float] | None = None,
+) -> pd.DataFrame:
     rows: list[dict[str, float | str]] = []
     for name in prices.columns:
         asset = prices[name].dropna()
@@ -33,8 +55,18 @@ def rank_exposures(prices: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
         frame[f"z_{label}"] = cross_sectional_zscore(frame[f"relative_{label}"])
         frame[f"percentile_{label}"] = percentile_rank(frame[f"relative_{label}"])
 
-    zcols = [f"z_{x}" for x in LOOKBACK_DAYS]
-    frame["momentum_z"] = frame[zcols].mean(axis=1, skipna=True)
+    # Weighted mean of the per-horizon Z-scores. A horizon with no data for an
+    # exposure drops out of both the numerator and the denominator, so a short
+    # history is scored on what it has rather than being penalised to zero.
+    active = normalise_weights(weights)
+    contributions = pd.DataFrame(
+        {label: frame[f"z_{label}"] * w for label, w in active.items()}
+    )
+    applied = pd.DataFrame(
+        {label: frame[f"z_{label}"].notna() * w for label, w in active.items()}
+    )
+    denominator = applied.sum(axis=1).replace(0.0, float("nan"))
+    frame["momentum_z"] = contributions.sum(axis=1, skipna=True) / denominator
 
     # Rank is an ordinal presentation field. Equal scores still receive a
     # deterministic unique position so the dashboard never shows misleading

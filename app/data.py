@@ -210,3 +210,46 @@ def vehicle_tracking(exposure_id: str) -> pd.DataFrame:
     return _tracking(
         exposure_id, _mtime("etf_prices.parquet") + _mtime("index_prices.parquet")
     )
+
+
+WEIGHT_SCHEMES: dict[str, dict[str, float]] = {
+    "Equal (live default)": {"1M": 25, "3M": 25, "6M": 25, "12M": 25},
+    "Short 1/3/6": {"1M": 33, "3M": 33, "6M": 34, "12M": 0},
+    "Tilted 10/50/40": {"1M": 10, "3M": 50, "6M": 40, "12M": 0},
+    "Classic 6-12": {"1M": 0, "3M": 0, "6M": 50, "12M": 50},
+    "3M only": {"1M": 0, "3M": 100, "6M": 0, "12M": 0},
+    "12M only": {"1M": 0, "3M": 0, "6M": 0, "12M": 100},
+}
+
+
+@st.cache_data(show_spinner="Testing every weighting…")
+def _sensitivity(
+    top_n: int, months: int, hold_months: int, absolute_filter: bool,
+    investable_only: bool, require_buy: bool, max_rank_depth: int, modified_ns: int = 0,
+):
+    del modified_ns
+    from src.quantitative.backtest import weight_sensitivity
+
+    panel, benchmark = load_index_panel()
+    if panel.empty:
+        return pd.DataFrame()
+    return weight_sensitivity(
+        panel, benchmark, WEIGHT_SCHEMES,
+        top_n=top_n, months=months, hold_months=hold_months,
+        absolute_filter=absolute_filter, investable_only=investable_only,
+        require_buy=require_buy, max_rank_depth=max_rank_depth,
+        vehicle_prices=load_etf_prices() if investable_only else None,
+        vehicles_by_exposure=vehicles_by_exposure() if investable_only else None,
+    )
+
+
+def load_sensitivity(
+    top_n: int = 2, months: int = 60, hold_months: int = 1, absolute_filter: bool = True,
+    investable_only: bool = True, require_buy: bool = True, max_rank_depth: int = 3,
+):
+    """How much the result depends on the weighting rather than the strategy."""
+    stamp = _mtime("index_prices.parquet") + _mtime("etf_prices.parquet")
+    return _sensitivity(
+        top_n, months, hold_months, absolute_filter,
+        investable_only, require_buy, max_rank_depth, stamp,
+    )

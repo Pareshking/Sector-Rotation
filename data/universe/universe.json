@@ -5,6 +5,12 @@
     "yfinance_symbol": "^NSEI",
     "source": "NSE Indices"
   },
+  "momentum_weights": {
+    "1M": 0.25,
+    "3M": 0.25,
+    "6M": 0.25,
+    "12M": 0.25
+  },
   "exposures": [
     {
       "id": "auto",
