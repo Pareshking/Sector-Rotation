@@ -7,11 +7,13 @@ on:
   # cancelled its own refresh through the concurrency group below.
   # Use workflow_dispatch to refresh on demand after a pipeline change.
   schedule:
-    # 04:00 IST = 22:30 UTC on the previous calendar day.
-    # Runs every calendar day; the pipeline uses the latest available market
-    # observation, so weekends and NSE holidays naturally fall back to the most
-    # recent working day.
+    # Primary: 04:00 IST = 22:30 UTC previous calendar day.
     - cron: "30 22 * * *"
+    # Retry: 08:30 IST = 03:00 UTC. Indian API sources (NSE, MFAPI, AMFI) are
+    # occasionally unreachable from GitHub's eastus runners at the primary hour.
+    # If the primary run succeeded the retry commits no-op data and exits;
+    # if it failed the retry catches it with the APIs reliably available.
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 concurrency:
