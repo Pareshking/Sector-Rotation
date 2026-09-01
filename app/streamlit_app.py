@@ -29,7 +29,7 @@ _LOGO_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 40">
 st.logo(
     f"data:image/svg+xml;base64,{base64.b64encode(_LOGO_SVG).decode()}",
     size="medium",
-    link="/Overview",
+    link="https://dualmomentum.streamlit.app/Overview",
 )
 
 ROOT = Path(__file__).resolve().parents[1]
