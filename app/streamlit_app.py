@@ -15,15 +15,14 @@ st.set_page_config(
 
 # Logo shown in the sticky top-nav so the site identity is always visible,
 # even after the brand_header scrolls out of view.
-_LOGO_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 40">
-  <rect x="0" y="26" width="7" height="13" rx="2" fill="#4338CA" opacity=".55"/>
-  <rect x="9"  y="18" width="7" height="21" rx="2" fill="#4338CA" opacity=".75"/>
-  <rect x="18" y="8"  width="7" height="31" rx="2" fill="#4338CA"/>
-  <rect x="27" y="22" width="7" height="17" rx="2" fill="#4338CA" opacity=".55"/>
-  <text x="40" y="29"
+_LOGO_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 40">
+  <circle cx="8"  cy="20" r="6" fill="#FF5F57"/>
+  <circle cx="22" cy="20" r="6" fill="#FEBC2E"/>
+  <circle cx="36" cy="20" r="6" fill="#28C840"/>
+  <text x="50" y="26"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif"
-        font-size="17" font-weight="800" letter-spacing="-.4" fill="#1E293B">
-    India Sector Rotation
+        font-size="16" font-weight="800" letter-spacing="-.4" fill="#1E293B">
+    Dual Momentum
   </text>
 </svg>"""
 st.logo(
