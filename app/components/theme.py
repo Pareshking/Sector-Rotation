@@ -50,8 +50,8 @@ _CSS = """
 }
 html,body,[class*="css"]{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;color:var(--ink);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .stApp{background:var(--bg)}
-[data-testid="stMainBlockContainer"]{max-width:1400px;padding-top:.35rem;padding-bottom:3.5rem}
-[data-testid="stHeader"]{background:rgba(255,255,255,.9);backdrop-filter:saturate(180%) blur(8px)}
+[data-testid="stMainBlockContainer"]{max-width:1400px;padding-top:1.5rem;padding-bottom:3.5rem}
+[data-testid="stHeader"]{background:rgba(255,255,255,.9);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--line)}
 h1,h2,h3,h4{color:var(--ink)!important;letter-spacing:-.028em!important;font-weight:750!important}
 h1{font-size:1.86rem!important;line-height:1.06!important;margin:0 0 .1rem!important;letter-spacing:-.036em!important}
 .block-container p{font-size:.875rem}
@@ -157,7 +157,7 @@ background:var(--bg2);padding:14px 16px;box-shadow:var(--shadow)}
 
 /* ---------- brand header ---------- */
 .brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);
-border-radius:var(--r);background:var(--bg);padding:10px 14px;box-shadow:var(--shadow);margin:.1rem 0 .5rem}
+border-radius:var(--r);background:var(--bg2);padding:10px 14px;box-shadow:var(--shadow);margin:.25rem 0 .5rem}
 .brand-dots{display:flex;gap:6px;flex:none}
 .brand-dots i{width:11px;height:11px;border-radius:50%;display:block}
 .brand-name{font-weight:800;font-size:1.02rem;letter-spacing:-.02em;white-space:nowrap}
