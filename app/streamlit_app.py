@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 
@@ -10,6 +11,25 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
+)
+
+# Logo shown in the sticky top-nav so the site identity is always visible,
+# even after the brand_header scrolls out of view.
+_LOGO_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 40">
+  <rect x="0" y="26" width="7" height="13" rx="2" fill="#4338CA" opacity=".55"/>
+  <rect x="9"  y="18" width="7" height="21" rx="2" fill="#4338CA" opacity=".75"/>
+  <rect x="18" y="8"  width="7" height="31" rx="2" fill="#4338CA"/>
+  <rect x="27" y="22" width="7" height="17" rx="2" fill="#4338CA" opacity=".55"/>
+  <text x="40" y="29"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif"
+        font-size="17" font-weight="800" letter-spacing="-.4" fill="#1E293B">
+    India Sector Rotation
+  </text>
+</svg>"""
+st.logo(
+    f"data:image/svg+xml;base64,{base64.b64encode(_LOGO_SVG).decode()}",
+    size="medium",
+    link="/Overview",
 )
 
 ROOT = Path(__file__).resolve().parents[1]
