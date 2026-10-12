@@ -89,3 +89,32 @@ def test_index_funds_are_excluded_from_exchange_traded():
     )
     assert exposure.tradable
     assert [e.symbol for e in exposure.exchange_traded] == ["MOREALTY"]
+
+
+def test_two_vehicles_sharing_a_scheme_code_or_isin_is_an_error():
+    """TECH and ITETF once shared scheme 148560, so both read one stranger's NAV."""
+    from src.models.exposure import ETFMapping, Exposure
+    from src.universe.validation import validate_universe
+
+    exposure = Exposure(
+        id="it", name="IT", category="sector", benchmark="Nifty IT",
+        etfs=[ETFMapping(name="A IT ETF", symbol="AIT", scheme_code=148560, isin="INF000000001"),
+              ETFMapping(name="B IT ETF", symbol="BIT", scheme_code=148560, isin="INF000000001")],
+    )
+    errors = validate_universe([exposure]).errors
+    assert any("Duplicate scheme code: 148560" in e for e in errors)
+    assert any("Duplicate ISIN: INF000000001" in e for e in errors)
+
+
+def test_every_shipped_vehicle_records_an_isin_and_every_index_a_launch_date():
+    from pathlib import Path
+
+    from src.universe.registry import UniverseRegistry
+
+    root = Path(__file__).resolve().parents[1]
+    exposures = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json").all()
+    missing_isin = [f"{x.id}/{v.symbol or v.name}" for x in exposures for v in x.etfs if not v.isin]
+    assert not missing_isin
+    assert not [x.id for x in exposures if x.launch_date is None]
+    bounded = {x.id for x in exposures if x.launch_date_is_upper_bound}
+    assert bounded == {"it", "mnc", "pse", "services"}

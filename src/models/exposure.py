@@ -39,6 +39,10 @@ class ETFMapping(BaseModel):
     vehicle: VehicleType = VehicleType.ETF
     name: str = Field(min_length=1)
     scheme_code: Optional[int] = Field(default=None, gt=0)
+    # The scheme's ISIN: NSE's ETF list for a listed ETF, AMFI's NAV file for an
+    # index fund. It ties the symbol to the scheme code, so a code that points
+    # at some other fund cannot pass review again.
+    isin: Optional[str] = Field(default=None, pattern=r"^INF[A-Z0-9]{9}$")
     yfinance_symbol: Optional[str] = None
     exchange: str = "NSE"
     aliases: list[str] = Field(default_factory=list)
@@ -72,6 +76,10 @@ class Exposure(BaseModel):
     # From the NSE Indices factsheet. History before launch_date is
     # back-calculated: NSE computed it after the fact, nobody could trade it.
     launch_date: Optional[date] = None
+    # True when NSE publishes no launch date and launch_date is only the latest
+    # day the index is documented as live. Masking from it is conservative: it
+    # can call live history back-calculated, never the reverse.
+    launch_date_is_upper_bound: bool = False
     base_date: Optional[date] = None
     dates_source: Optional[str] = None
 

@@ -73,6 +73,16 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
     for symbol, count in Counter(etf_symbols).items():
         if count > 1:
             errors.append(f"Duplicate ETF symbol: {symbol}")
+    # A scheme code is the vehicle's store id and its MFAPI price source; two
+    # vehicles sharing one (TECH and ITETF once did) silently share one history.
+    vehicles = [etf for exposure in exposures for etf in exposure.etfs]
+    for label, values in (
+        ("scheme code", [etf.scheme_code for etf in vehicles if etf.scheme_code is not None]),
+        ("ISIN", [etf.isin for etf in vehicles if etf.isin]),
+    ):
+        for value, count in Counter(values).items():
+            if count > 1:
+                errors.append(f"Duplicate {label}: {value} is mapped to {count} vehicles")
     for alias, count in Counter(all_aliases).items():
         if count > 1:
             errors.append(f"Duplicate ETF alias: {alias}")
