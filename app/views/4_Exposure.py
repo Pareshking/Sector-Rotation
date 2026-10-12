@@ -10,10 +10,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import CHART_CONFIG, drawdown_chart, etf_comparison, price_chart, rs_trajectory
+from app.components.charts import (
+    CHART_CONFIG,
+    drawdown_chart,
+    etf_comparison,
+    price_chart,
+    rs_trajectory,
+)
 from app.components.metrics import source_label
+from app.components.navigation import mobile_nav
 from app.components.theme import (
-    mobile_nav,
     ACTION_CLASS,
     _esc,
     fmt_num,
@@ -24,10 +30,18 @@ from app.components.theme import (
     page_header,
     section,
 )
-from app.data import load_decisions, load_etf_prices, load_etfs, load_rs, vehicle_tracking
+from app.data import (
+    best_vehicle,
+    load_decisions,
+    load_etf_prices,
+    load_etfs,
+    load_portfolio,
+    load_rs,
+    vehicle_tracking,
+)
 
 inject_theme()
-mobile_nav("ETF_Detail")
+mobile_nav("Exposure")
 page_header(
     "Implementation",
     "Exposure Detail",
@@ -153,6 +167,13 @@ if exposure_id in getattr(rs, "columns", []):
     st.plotly_chart(rs_trajectory(rs, exposure_id), width="stretch", config=CHART_CONFIG)
 
 section("Implementation vehicle")
+_live = load_portfolio()
+_choice = best_vehicle(exposure_id, _live.target.as_of) if _live is not None else None
+if _choice is not None:
+    note(
+        f"<b>Best vehicle at the {_live.target.as_of:%d %b %Y} decision: {_esc(_choice.label)}.</b> "
+        f"{_esc(_choice.reason)} The Portfolio page uses the same rule."
+    )
 if selected.empty:
     note(
         "No listed ETF or fund is currently mapped to this exposure. The index signal stands, but "

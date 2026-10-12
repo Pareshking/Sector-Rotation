@@ -41,13 +41,11 @@ Display only: Mansfield RS, RRG stage, durability analytics (src/quantitative)
 
 | Page | Question it answers |
 | --- | --- |
-| **Dashboard** | What does the target portfolio hold after the latest month-end rebalance, what must I trade, and when is the next rebalance? |
-| **Sectors** | Which sectors are held or rank highest, and what do their returns look like across horizons? |
-| **Themes** | The same, for thematic exposures. |
-| **Screener** | Filter and sort the whole universe on any column and any lookback. |
-| **Backtest** | Would the strategy the dashboard shows have beaten Nifty 50, after costs? |
-| **Exposure** | For one exposure: the decision, the relative-strength path, and the funds that implement it. |
-| **Data Health** | Where every series came from, what it actually is, and what is missing. |
+| **Portfolio** | What should I hold now, what must I trade, at what cost, and when is the next rebalance? One regime chip (Nifty 50 TRI vs the liquid fund over 12 months, context only), the target portfolio with the best vehicle, target and held weights, action, estimated cost and days to build, the reason for every line, and the names on the edge of the retention buffer. |
+| **Rankings** | Where does every sector and theme stand on the strategy's score today? One sortable table filtered All / Sectors / Themes, with the RRG quadrant view in a collapsed expander (display context only). |
+| **Evidence** | Would the live rules have beaten Nifty 50 TRI after costs, and is that evidence? Net CAGR, total return, excess, drawdown and the **Deflated Sharpe ratio**; with and without back-calculated history; rolling 12-month windows; early vs recent. The parameter grid sits in a collapsed "Parameter Sensitivity (Unvalidated)" expander. |
+| **Exposure** | For one exposure: the decision, the relative-strength path, and the funds that implement it — including the vehicle the Portfolio page would choose and why. |
+| **Data Health** | Where every series came from, what it actually is, what is missing, which index history is back-calculated (NSE launch dates), and which liquid fund supplies the cash return. |
 | **Method** | The complete theory in one page: score, portfolio rule, stages, backtest, provenance. |
 
 Every page is read-only. The app performs no downloads at page load; it reads prepared files
@@ -219,7 +217,7 @@ decided. The dashboard, the alert tool and every rebalance of the backtest call 
    were computed after the fact. v1.1 keeps them (`include`); `exclude_prelaunch` makes an index
    ineligible before its launch. 24 of the 47 indices launched inside the five-year panel —
    Telecom, Capital Goods, Power, Consumer Services and Sugar & Ethanol only in June 2026 — so the
-   Backtest page shows the strategy both ways.
+   Evidence page shows the strategy both ways.
 
 | Action | Meaning |
 | --- | --- |
@@ -249,7 +247,7 @@ generated before the rule existed.
 An exposure with no instrument is research, not a position, so the strategy never holds one:
 with `require_investable` on, only exposures whose mapped ETF or index fund had incepted by the
 decision date (by its recorded `inception_date`) are eligible. Elsewhere in the app, exposures without one carry a `no fund` badge,
-and a **Buyable only** filter on the Dashboard and Screener keeps just the ones you can act on.
+and a **Buyable only** filter on the Rankings page keeps just the ones you can act on.
 
 Two vehicle types are tracked separately, because they are bought differently. An **ETF** trades
 on exchange at a price that can sit above or below NAV. An **open-ended index fund** transacts
@@ -335,7 +333,7 @@ every month-end close — the same chain as the dashboard — and does the accou
   session's close (`execution_fill: t_plus_1_close`). The old portfolio earns the session in
   between; each period runs from one fill to the next.
 - **Costs are charged.** `cost_bps_per_side` (25) on every unit of weight bought or sold, cash
-  legs excluded: `cost = bps × Σ|w − w_prior|`, deducted at the fill. The Backtest page reports
+  legs excluded: `cost = bps × Σ|w − w_prior|`, deducted at the fill. The Evidence page reports
   gross, costs and net.
 - **Cash earns what the liquid fund earned** between the two fills — the same NAV series as the
   hurdle. The constant (`risk_free_rate_annual`, 6.5%) is used only for periods that start before
@@ -351,19 +349,26 @@ a fund with a price on that date, judged from the vehicle's own history rather t
 lineup. *All indices* applies the same rules to every index whether or not a fund existed; it
 measures the signal, not a portfolio anyone could have held.
 
-**Rolling windows and the early/recent split** are on the Backtest page. A single headline number
+**Rolling windows and the early/recent split** are on the Evidence page. A single headline number
 depends on when the test started; the distribution of every 12-month window does not.
 
 **No figures are quoted here.** Earlier versions of this README carried hand-typed backtest
-numbers that went stale with every nightly refresh and every rule change. The Backtest page
+numbers that went stale with every nightly refresh and every rule change. The Evidence page
 computes them from the current data and the current `strategy.json`.
 
-**What-if settings are not the strategy.** The page lets N, the buffer, the holding period, the
-window, the cost and the hurdle be changed, and runs six alternative score specifications on
-demand. Any setting that differs from `strategy.json` is labelled a what-if run. Choosing the
-best-looking one is fitting this sample.
+**What-if settings are not the strategy.** The Evidence page's "Parameter Sensitivity
+(Unvalidated)" expander reaches 768 strategy configurations (N × buffer × holding period × hurdle ×
+back-calculated history × score specification) across 96 evaluation settings (universe × window ×
+exposures × cost). Picking the best-looking one is fitting this sample.
 
-**Limits, stated plainly.** v1.0 was specified after studying these same four years, so the
+**Deflated Sharpe ratio.** The headline is deflated for those 768 trials (Bailey & López de Prado
+2014): the probability that the true monthly Sharpe ratio is above zero after allowing for the best
+result that many zero-edge configurations would produce by luck. The variance of Sharpe estimates
+across trials is not observed, so it is set to `1 / (T − 1)`, the sampling variance of a Sharpe
+ratio under no edge. Below 95% is not evidence of an edge; on the current five years it is well
+below.
+
+**Limits, stated plainly.** The rules were specified after studying these same four years, so the
 backtest is point-in-time but not out-of-sample. 25 bps per side covers brokerage and spread only
 roughly; tax, ETF premium to NAV and impact on thin funds are not modelled. These are index
 levels, and an index cannot be bought directly; a fund lags by its tracking difference. Index
@@ -379,7 +384,7 @@ chosen in 2026. Treat the record as a check on the rules, not as evidence of an 
 | --- | --- |
 | `summary_rankings.parquet` | One row per exposure: stage, RS ratio/momentum, returns, `data_source`, `value_type`, and `momentum_z` / `rank` — the strategy score and its rank across the universe as of the latest session |
 | `rs_matrix.parquet` | Weekly Mansfield RS per exposure |
-| `index_prices.parquet` | Daily canonical index levels per exposure plus the Nifty 50 benchmark in `__benchmark__` — required by the Backtest page |
+| `index_prices.parquet` | Daily canonical index levels per exposure plus the Nifty 50 benchmark in `__benchmark__` — required by the Evidence page |
 | `etf_universe.parquet` | ETF metadata per exposure |
 | `etf_prices.parquet` | Daily ETF price/NAV history |
 | `cash_nav.parquet` | Daily NAV of the cash proxy (the liquid fund) |
@@ -414,7 +419,7 @@ carry the value, its type (TRI / CLOSE / NAV), its source and when it was fetche
   is reported in `metadata.json → ingest`. Fund histories are merged on every run (MFAPI returns a
   fund's whole history in one request), so a fund that fails one night keeps its history too.
 
-If `index_prices.parquet` is absent the Backtest page explains what is missing and the rest of
+If `index_prices.parquet` is absent the Evidence page explains what is missing and the rest of
 the app is unaffected.
 
 ## Data health telemetry

@@ -10,7 +10,7 @@ instead of several hundred widgets.
 from __future__ import annotations
 
 import html
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import pandas as pd
 import streamlit as st
@@ -254,16 +254,6 @@ def fmt_signed(value: object, digits: int = 2) -> str:
         return "—"
 
 
-def _sign_class(value: object) -> str:
-    try:
-        value = float(value)
-        if pd.isna(value):
-            return "rt-zero"
-        return "rt-pos" if value > 0 else ("rt-neg" if value < 0 else "rt-zero")
-    except (TypeError, ValueError):
-        return "rt-zero"
-
-
 def _esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""))
 
@@ -304,55 +294,6 @@ def kpi_strip(items: Sequence[tuple[str, object, str, str]]) -> None:
     st.markdown(f'<div class="kpis">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
-def action_pill(action: str) -> str:
-    action = str(action or "NOT HELD")
-    return f'<span class="pill pill-{ACTION_CLASS.get(action, "slate")}">{_esc(action)}</span>'
-
-
-def stage_cell(stage: str) -> str:
-    colour = STAGE_COLORS.get(str(stage), "#94A3B8")
-    return f'<span class="dot" style="background:{colour}"></span>{_esc(stage)}'
-
-
-def _zbar(value: object, scale: float) -> str:
-    try:
-        z = float(value)
-    except (TypeError, ValueError):
-        z = float("nan")
-    if pd.isna(z) or scale <= 0:
-        return '<div class="zwrap"><div class="ztrack"></div><span class="znum rt-zero">—</span></div>'
-    width = min(abs(z) / scale, 1.0) * 50.0
-    left = 50.0 if z >= 0 else 50.0 - width
-    colour = "var(--buy)" if z >= 0 else "var(--red)"
-    cls = "rt-pos" if z >= 0 else "rt-neg"
-    return (
-        f'<div class="zwrap"><div class="ztrack">'
-        f'<i class="zfill" style="left:{left:.1f}%;width:{width:.1f}%;background:{colour}"></i>'
-        f'</div><span class="znum {cls}">{z:+.2f}</span></div>'
-    )
-
-
-def sparkline(values: Iterable[float], width: int = 52, height: int = 16) -> str:
-    """Inline SVG trend of the recent relative-strength path."""
-    series = [float(v) for v in values if v == v]
-    if len(series) < 4:
-        return '<span class="rt-zero" style="font-size:.7rem">—</span>'
-    lo, hi = min(series), max(series)
-    span = (hi - lo) or 1.0
-    step = width / (len(series) - 1)
-    points = " ".join(
-        f"{i * step:.1f},{height - 1 - (v - lo) / span * (height - 2):.1f}"
-        for i, v in enumerate(series)
-    )
-    colour = "#059669" if series[-1] >= series[0] else "#E11D48"
-    return (
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-        f'preserveAspectRatio="none" aria-hidden="true">'
-        f'<polyline points="{points}" fill="none" stroke="{colour}" stroke-width="1.4" '
-        f'stroke-linejoin="round" stroke-linecap="round"/></svg>'
-    )
-
-
 def stage_legend() -> None:
     items = "".join(
         f'<span><i class="dot" style="background:{colour}"></i>{_esc(stage)}</span>'
@@ -380,7 +321,7 @@ def brand_header(
     )
     chips = []
     if regime:
-        colour = "var(--buy)" if regime.upper().startswith("BULL") else "var(--red)"
+        colour = "var(--buy)" if regime.upper().startswith(("BULL", "RISK-ON")) else "var(--red)"
         chips.append(
             f'<span class="brand-sep">|</span><span class="brand-stat">'
             f'<i class="dot" style="background:{colour}"></i>'
@@ -397,38 +338,3 @@ def brand_header(
         f'{"".join(chips)}{when_html}</div>',
         unsafe_allow_html=True,
     )
-
-
-NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
-    ("Dashboard", "Overview", "📊"),
-    ("Sectors", "Sectors", "🏭"),
-    ("Themes", "Themes", "🧭"),
-    ("Screener", "Rankings", "🔎"),
-    ("Backtest", "Backtest", "📈"),
-    ("Exposure", "ETF_Detail", "💹"),
-    ("Data Health", "System_Health", "🛡️"),
-    ("Method", "Method", "📘"),
-)
-
-
-# The default page is served at the root. Streamlit does not route its
-# url_path, so "/Overview" answers "Page not found".
-HOME_PATH = "Overview"
-
-
-def nav_href(path: str) -> str:
-    return "/" if path == HOME_PATH else f"/{path}"
-
-
-def mobile_nav(active: str = "") -> None:
-    """Horizontal, scrollable page bar for narrow screens.
-
-    Streamlit hides its own top navigation below ~768px, so without this every
-    page sits two taps deep behind a chevron on a phone.
-    """
-    links = "".join(
-        f'<a class="{"on" if path == active else ""}" href="{nav_href(path)}" target="_self">'
-        f'{icon} {_esc(label)}</a>'
-        for label, path, icon in NAV_ITEMS
-    )
-    st.markdown(f'<nav class="mnav">{links}</nav>', unsafe_allow_html=True)

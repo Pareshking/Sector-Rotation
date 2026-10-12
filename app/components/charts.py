@@ -6,7 +6,6 @@ red, Improving blue — so a bar, a badge and a table dot all mean the same thin
 
 from __future__ import annotations
 
-import math
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -60,115 +59,6 @@ def _stage_colour(stage: object) -> str:
 # --------------------------------------------------------------------------- #
 # ranking + returns
 # --------------------------------------------------------------------------- #
-def momentum_bar(frame: pd.DataFrame, limit: int = 16, height: int | None = None) -> go.Figure:
-    """Composite momentum Z-score, coloured by rotation stage.
-
-    A Z-score is standardised to a mean of exactly zero, so roughly half the
-    universe sits below the line by construction. A bar pointing left means
-    *below the universe average*, not a loss — several of those exposures are up
-    on the period. The axis and the hover both say so, because a negative bar
-    reads as a loss otherwise.
-    """
-    data = frame.sort_values("momentum_z", ascending=False).head(limit).sort_values("momentum_z")
-    fig = go.Figure()
-    if data.empty:
-        return _finish(fig, height or 320)
-
-    has_returns = {"return_3M", "relative_3M"}.issubset(data.columns)
-    custom = (
-        data[["stage", "model_action", "return_3M", "relative_3M"]].to_numpy()
-        if has_returns and "model_action" in data.columns
-        else data[["stage", "stage"]].to_numpy()
-    )
-    hover = (
-        "<b>%{y}</b><br>Momentum Z %{x:+.2f} vs universe average"
-        "<br>%{customdata[0]} · %{customdata[1]}"
-        "<br>3M return %{customdata[2]:.2%}<br>3M vs Nifty 50 %{customdata[3]:+.2%}<extra></extra>"
-        if has_returns and "model_action" in data.columns
-        else "<b>%{y}</b><br>Momentum Z %{x:+.2f} vs universe average<extra></extra>"
-    )
-    fig.add_trace(
-        go.Bar(
-            x=data.momentum_z, y=data.exposure, orientation="h",
-            marker=dict(color=[_stage_colour(s) for s in data.stage], line=dict(width=0)),
-            customdata=custom, hovertemplate=hover, showlegend=False,
-        )
-    )
-    fig.add_vline(x=0, line_color="#64748B", line_width=1.4)
-    fig.add_annotation(
-        x=0, y=1.0, yref="paper", yanchor="bottom", xanchor="center", showarrow=False,
-        text="universe average", font=dict(size=9.5, color=MUTED), yshift=4,
-    )
-    fig.update_layout(
-        xaxis_title="Composite momentum Z-score · 0 = universe average, not zero return",
-        xaxis=dict(title_font=dict(size=11, color=MUTED), zeroline=False),
-        yaxis=dict(tickfont=dict(size=11, color=INK)),
-        bargap=0.3,
-    )
-    return _finish(fig, height or max(260, 26 * len(data) + 80))
-
-
-def returns_heatmap(frame: pd.DataFrame, limit: int = 20, height: int | None = None) -> go.Figure:
-    cols = [c for c in ["return_1M", "return_3M", "return_6M", "return_12M"] if c in frame.columns]
-    data = frame.sort_values("momentum_z", ascending=False).head(limit)
-    if data.empty or not cols:
-        return _finish(go.Figure(), height or 320)
-    matrix = data.set_index("exposure")[cols].replace([math.inf, -math.inf], pd.NA).dropna(how="all")
-    if matrix.empty:
-        return _finish(go.Figure(), height or 320)
-    values = matrix.to_numpy(dtype=float)
-    bound = float(pd.DataFrame(values).abs().max().max() or 0.01)
-    text = matrix.map(lambda v: "—" if pd.isna(v) else f"{v * 100:.1f}")
-    fig = go.Figure(
-        go.Heatmap(
-            z=values,
-            x=[c.replace("return_", "") for c in matrix.columns],
-            y=list(matrix.index),
-            text=text.to_numpy(),
-            texttemplate="%{text}",
-            textfont=dict(size=10.5, family="Inter, sans-serif"),
-            colorscale=RETURN_SCALE,
-            zmid=0, zmin=-bound, zmax=bound,
-            xgap=2, ygap=2,
-            hovertemplate="<b>%{y}</b><br>%{x} return %{z:.2%}<extra></extra>",
-            colorbar=dict(
-                title=dict(text="Return %", font=dict(size=10, color=MUTED)),
-                thickness=9, len=0.75, outlinewidth=0, tickfont=dict(size=10, color=MUTED),
-                tickformat=".0%",
-            ),
-        )
-    )
-    fig.update_layout(margin=dict(l=10, r=10, t=8, b=24))
-    fig.update_xaxes(side="top", tickfont=dict(size=11, color=INK), showgrid=False)
-    fig.update_yaxes(tickfont=dict(size=11, color=INK), showgrid=False, autorange="reversed")
-    return _finish(fig, height or max(300, 25 * len(matrix) + 70))
-
-
-def stage_distribution(frame: pd.DataFrame, height: int = 62) -> go.Figure:
-    """Breadth bar: how much of the universe sits in each rotation stage."""
-    order = ["Leading", "Weakening", "Lagging", "Improving"]
-    counts = frame["stage"].value_counts()
-    present = [s for s in order if counts.get(s, 0) > 0]
-    fig = go.Figure()
-    for stage in present:
-        fig.add_trace(
-            go.Bar(
-                x=[int(counts[stage])], y=["breadth"], orientation="h", name=stage,
-                marker=dict(color=_stage_colour(stage), line=dict(width=0)),
-                text=[f"{stage} {int(counts[stage])}"], textposition="inside",
-                insidetextanchor="middle", textangle=0, cliponaxis=False, constraintext="inside",
-                textfont=dict(color="white", size=11.5, family="Inter, sans-serif"),
-                hovertemplate=f"<b>{stage}</b>: %{{x}} exposures<extra></extra>",
-            )
-        )
-    fig.update_layout(
-        barmode="stack", showlegend=False,
-        margin=dict(l=4, r=4, t=4, b=4),
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
-    )
-    fig.update_layout(**{k: v for k, v in _LAYOUT.items() if k != "margin"}, height=height,
-                      autosize=True, uirevision="breadth")
-    return fig
 
 
 # --------------------------------------------------------------------------- #
@@ -424,3 +314,42 @@ def rolling_excess(windows: pd.DataFrame, height: int = 280) -> go.Figure:
         bargap=0.25,
     )
     return _finish(fig, height)
+
+
+def rrg_scatter(frame: pd.DataFrame, height: int = 460) -> go.Figure:
+    """Relative-rotation view: RS ratio (vs its 52-week average) against RS velocity.
+
+    Display context only — the portfolio is built from the strategy score, not
+    from these quadrants.
+    """
+    data = frame.dropna(subset=["rs_ratio", "rs_momentum"])
+    fig = go.Figure()
+    for stage in ["Leading", "Weakening", "Lagging", "Improving"]:
+        part = data[data["stage"] == stage]
+        if part.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=part["rs_ratio"], y=part["rs_momentum"], mode="markers+text", name=stage,
+                text=part["exposure"], textposition="top center",
+                textfont=dict(size=10, color=MUTED),
+                marker=dict(size=10, color=_stage_colour(stage), line=dict(width=1, color="white")),
+                hovertemplate="<b>%{text}</b><br>RS ratio %{x:.3f}<br>RS velocity %{y:+.2f}<extra></extra>",
+            )
+        )
+    fig.add_vline(x=1.0, line=dict(color=LINE, width=1.5))
+    fig.add_hline(y=0.0, line=dict(color=LINE, width=1.5))
+    for x, y, label in ((1, 1, "Leading"), (1, 0, "Weakening"), (0, 0, "Lagging"), (0, 1, "Improving")):
+        fig.add_annotation(
+            x=x, y=y, xref="paper", yref="paper", text=label, showarrow=False,
+            xanchor="right" if x else "left", yanchor="top" if y else "bottom",
+            font=dict(size=11, color=_stage_colour(label)),
+        )
+    fig.update_layout(
+        **_LAYOUT,
+        height=height,
+        showlegend=False,
+        xaxis=dict(title="RS ratio · RS line relative to its own 52-week average", gridcolor=GRID, zeroline=False),
+        yaxis=dict(title="RS velocity · 13-week change", gridcolor=GRID, zeroline=False),
+    )
+    return fig

@@ -17,10 +17,10 @@ from app.components.metrics import (
     lineage_frame,
     source_label,
 )
+from app.components.navigation import mobile_nav
 from app.components.theme import (
     inject_theme,
     kpi_strip,
-    mobile_nav,
     note,
     page_header,
     section,
@@ -28,7 +28,7 @@ from app.components.theme import (
 from app.data import load_cash_nav, load_decisions, load_index_panel, universe_metadata
 
 inject_theme()
-mobile_nav("System_Health")
+mobile_nav("Data_Health")
 page_header(
     "Trust & Lineage",
     "Data Health",
@@ -87,7 +87,7 @@ panel, benchmark = load_index_panel()
 if panel.empty:
     note(
         "The canonical index price panel (<code>index_prices.parquet</code>) has not been written "
-        "yet. The Backtest page needs it; the next pipeline run produces it.",
+        "yet. The Evidence page needs it; the next pipeline run produces it.",
         tone="amber",
     )
 else:
@@ -133,7 +133,7 @@ else:
         note(
             f"<b>{len(rows)} of {panel.shape[1]} indices launched inside the panel.</b> Launch and base "
             "dates come from each index's NSE Indices factsheet, recorded in <code>universe.json</code>. "
-            "The Backtest page can exclude everything before each launch date.",
+            "The Evidence page shows the strategy with and without everything before each launch date.",
             tone="amber",
         )
     else:

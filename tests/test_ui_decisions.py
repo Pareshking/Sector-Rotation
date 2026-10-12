@@ -66,8 +66,6 @@ def test_buyable_follows_vehicle_history_on_the_decision_date():
     assert out.loc["a", "model_action"] == "NOT HELD"
 
 
-
-
 def test_a_proxy_history_is_never_actionable_even_if_held():
     summary = _summary(ids=("a", "b"))
     summary.loc[summary.exposure_id == "a", "data_source"] = "benchmark_proxy"
@@ -111,32 +109,6 @@ def test_exposures_sharing_one_index_are_flagged_not_deduplicated():
     assert out.loc["Pharma", "shares_index_with"] is None
 
 
-def test_ranking_defaults_to_return_relative_to_the_benchmark():
-    """A relative-strength model must rank on relative return, not raw return.
-
-    In a rising market ranking on absolute return largely re-ranks the market.
-    """
-    from app.components.tables import BASIS_ABSOLUTE, BASIS_RELATIVE, _column_for
-
-    assert _column_for("3M", BASIS_RELATIVE) == "relative_3M"
-    assert _column_for("3M", BASIS_ABSOLUTE) == "return_3M"
-    assert _column_for("Composite", BASIS_RELATIVE) == "momentum_z"
-    assert _column_for("Composite", BASIS_ABSOLUTE) == "momentum_z"
-
-
-def test_relative_ranking_reorders_versus_absolute():
-    from app.components.tables import BASIS_ABSOLUTE, BASIS_RELATIVE, _column_for
-
-    frame = pd.DataFrame([
-        {"exposure": "Beta chaser", "return_3M": 0.20, "relative_3M": 0.01},
-        {"exposure": "True leader", "return_3M": 0.12, "relative_3M": 0.09},
-    ])
-    by_abs = frame.sort_values(_column_for("3M", BASIS_ABSOLUTE), ascending=False)
-    by_rel = frame.sort_values(_column_for("3M", BASIS_RELATIVE), ascending=False)
-    assert by_abs.exposure.iat[0] == "Beta chaser"
-    assert by_rel.exposure.iat[0] == "True leader"
-
-
 def test_notes_state_the_decision_date_and_never_claim_a_benchmark_comparison():
     out = decision_frame(_summary(), _portfolio(prior={"c": 0.5, "d": 0.5}))
     for note in out["analysis_note"]:
@@ -150,39 +122,3 @@ def test_the_rs_ratio_column_help_does_not_claim_a_benchmark_comparison():
     _, _, help_text = COLUMNS["rs_ratio"]
     assert "52-week moving average" in help_text
     assert "Nifty" not in help_text
-
-
-def test_navigation_links_to_the_default_page_at_the_root():
-    """'/Overview' answers 'Page not found': the default page is served at '/'."""
-    from app.components.theme import NAV_ITEMS, nav_href
-
-    assert nav_href("Overview") == "/"
-    assert nav_href("Backtest") == "/Backtest"
-    assert all(nav_href(path) != "/Overview" for _, path, _ in NAV_ITEMS)
-
-
-def test_the_logo_links_to_the_site_root():
-    from pathlib import Path
-
-    source = (Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py").read_text(encoding="utf-8")
-    assert 'link="https://dualmomentum.streamlit.app/"' in source
-    assert "streamlit.app/Overview" not in source
-
-
-def test_dashboard_reasons_are_escaped_not_parsed_as_html():
-    """A reason contains 'rank <= 4'; rendered raw, '<=' swallowed the rest of the line."""
-    from pathlib import Path
-
-    import pytest
-    from streamlit.testing.v1 import AppTest
-
-    root = Path(__file__).resolve().parents[1]
-    if not (root / "data" / "processed" / "index_prices.parquet").exists():
-        pytest.skip("no published dataset")
-    at = AppTest.from_file(str(root / "app" / "views" / "1_Overview.py"), default_timeout=240).run()
-    assert not at.exception
-    held_notes = [m.value for m in at.markdown if "Retained inside the buffer" in m.value or "New entry" in m.value]
-    assert held_notes
-    for value in held_notes:
-        assert "&lt;=" in value
-        assert "(rank cash" not in value

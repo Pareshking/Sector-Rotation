@@ -220,7 +220,7 @@ def construct_target_portfolio(
             bits.append(f"score {float(table.at[e, 'score']):+.2f}")
         if pd.notna(x):
             relation = ">" if x > hurdle else "<="
-            bits.append(f"12M return {float(x):+.1%} {relation} cash {hurdle:.1%}")
+            bits.append(f"12M return {float(x):+.1%} {relation} cash {hurdle:.2%}")
         return ", ".join(bits)
 
     keep: list[str] = []
