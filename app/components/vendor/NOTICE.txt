@@ -1,0 +1,9 @@
+lightweight-charts.standalone.production.js
+
+TradingView Lightweight Charts(TM) v5.2.1
+Copyright (c) 2026 TradingView, Inc. https://www.tradingview.com/
+Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/LICENSE-2.0
+
+The chart's own logo is hidden (layout.attributionLogo: false): the app is for the
+owner's personal use (owner, 12 Oct 2026). Highcharts is used under its
+non-commercial licence for the same reason; see HIGHCHARTS_LICENSE.txt.
