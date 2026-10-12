@@ -204,7 +204,9 @@ def backtest_config(
     return base.replace(**changes) if changes else base
 
 
-@st.cache_data(show_spinner="Running the backtest…")
+# Bounded: every what-if combination is a separate cache entry, and the page
+# exposes thousands of them. Without a cap a long session grows without limit.
+@st.cache_data(show_spinner="Running the backtest…", max_entries=32)
 def _backtest(config_json: str, months: int | None, category: str, modified_ns: int = 0):
     del modified_ns
     from src.config import StrategyConfig
@@ -276,7 +278,7 @@ SCORE_SCHEMES: dict[str, dict[str, object]] = {
 }
 
 
-@st.cache_data(show_spinner="Testing every score specification…")
+@st.cache_data(show_spinner="Testing every score specification…", max_entries=32)
 def _sensitivity(config_json: str, months: int | None, category: str = "All", modified_ns: int = 0):
     del modified_ns
     from src.config import ScoreSpec, StrategyConfig
@@ -300,3 +302,85 @@ def load_sensitivity(config=None, months: int | None = None, category: str = "Al
     config = config or strategy_config()
     stamp = _stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet")
     return _sensitivity(config.model_dump_json(), months, category, stamp)
+
+
+# --------------------------------------------------------------------------- #
+# The what-if grid, defined once: the Evidence page builds its controls from it
+# and the Deflated Sharpe ratio counts its strategy-defining options as trials.
+# --------------------------------------------------------------------------- #
+STRATEGY_OPTIONS: dict[str, list[object]] = {
+    "Hold top N": [1, 2, 3, 5],
+    "Retention buffer": ["M = 2N", "Off (M = N)"],
+    "Holding period (months)": [1, 2, 3, 6],
+    "Cash hurdle": ["On", "Off"],
+    "Back-calculated history": ["Included", "Excluded"],
+    "Score specification": list(SCORE_SCHEMES),
+}
+EVALUATION_OPTIONS: dict[str, list[object]] = {
+    "Universe": ["Buyable (strategy)", "All indices (signal)"],
+    "History window": ["All", 24, 36, 48],
+    "Which exposures": ["All", "Sectors", "Themes"],
+    "Cost per side (bps)": [0, 10, 25, 50],
+}
+
+
+def _product(options: dict[str, list[object]]) -> int:
+    total = 1
+    for values in options.values():
+        total *= len(values)
+    return total
+
+
+STRATEGY_TRIALS = _product(STRATEGY_OPTIONS)
+EVALUATION_SETTINGS = _product(EVALUATION_OPTIONS)
+
+
+@st.cache_data(show_spinner=False)
+def _vehicle_frame(modified_ns: int = 0) -> pd.DataFrame:
+    """Every vehicle with its authoritative inception date (universe.json) and its NSE snapshot.
+
+    Inception dates come from the registry, never from the snapshot file, so a
+    dataset published before the dates existed still chooses correctly.
+    """
+    del modified_ns
+    from src.portfolio.live import load_registry
+
+    rows = [
+        {
+            "exposure_id": exposure.id,
+            "symbol": vehicle.symbol,
+            "name": vehicle.name,
+            "vehicle": vehicle.vehicle.value,
+            "scheme_code": vehicle.scheme_code,
+            "inception_date": pd.Timestamp(vehicle.inception_date) if vehicle.inception_date else pd.NaT,
+        }
+        for exposure in load_registry(UNIVERSE_PATH).all()
+        for vehicle in exposure.etfs
+    ]
+    frame = pd.DataFrame(rows)
+    snapshot = load_etfs()
+    if not snapshot.empty:
+        keep = [c for c in ("traded_value", "premium_discount_pct", "last_price", "nav") if c in snapshot.columns]
+        snap = snapshot.assign(_key=snapshot["symbol"].fillna(snapshot["name"]))[["exposure_id", "_key", *keep]]
+        frame = frame.assign(_key=frame["symbol"].fillna(frame["name"])).merge(
+            snap, on=["exposure_id", "_key"], how="left"
+        ).drop(columns="_key")
+    return frame
+
+
+def best_vehicle(exposure_id: str, as_of):
+    """The fund to buy ``exposure_id`` through on ``as_of`` (src/portfolio/vehicles.py)."""
+    from src.portfolio.vehicles import choose_vehicle
+
+    frame = _vehicle_frame(_stamp("etf_universe.parquet"))
+    return choose_vehicle(exposure_id, as_of, frame, vehicle_tracking(exposure_id))
+
+
+def current_regime():
+    """RISK-ON / RISK-OFF: Nifty 50 TRI's 12-month return against cash's (display only)."""
+    from src.portfolio.regime import market_regime
+
+    _, benchmark = load_index_panel()
+    if benchmark.empty:
+        return None
+    return market_regime(benchmark, load_cash_nav(), strategy_config().risk_free_rate_annual)

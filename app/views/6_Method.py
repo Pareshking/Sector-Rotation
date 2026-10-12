@@ -10,7 +10,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.metrics import get_metadata, health_summary
-from app.components.theme import mobile_nav, inject_theme, note, page_header, section
+from app.components.navigation import mobile_nav
+from app.components.theme import inject_theme, note, page_header, section
 from app.data import load_decisions, load_portfolio, strategy_config
 
 inject_theme()
@@ -206,7 +207,7 @@ the hurdle — and {rf} only for periods before the fund's NAV history.
 
 **Back-calculated history.** NSE computes an index's values back to its base date when it launches
 it, so years of every new index's history were never tradable. Each index's launch date is recorded
-in `universe.json` from its NSE Indices factsheet, and the Backtest page can exclude everything
+in `universe.json` from its NSE Indices factsheet, and the Evidence page shows the strategy with and without everything
 before it.
 
 Two universes:

@@ -237,23 +237,6 @@ def decision_frame(summary: pd.DataFrame, portfolio=None) -> pd.DataFrame:
     return frame
 
 
-def action_counts(frame: pd.DataFrame) -> dict[str, int]:
-    keys = ("total", "eligible", "held", "buy", "hold", "trim", "sell", "not_held")
-    if frame is None or frame.empty or "model_action" not in frame:
-        return dict.fromkeys(keys, 0)
-    action = frame["model_action"]
-    return {
-        "total": len(frame),
-        "eligible": int(frame["decision_eligible"].sum()),
-        "held": int(action.isin(HELD_ACTIONS).sum()),
-        "buy": int((action == "BUY").sum()),
-        "hold": int((action == "HOLD").sum()),
-        "trim": int((action == "TRIM").sum()),
-        "sell": int((action == "SELL").sum()),
-        "not_held": int((action == NOT_HELD).sum()),
-    }
-
-
 def market_state(panel: pd.DataFrame, benchmark: pd.Series, decisions: pd.DataFrame) -> dict[str, object]:
     """Headline market context: regime, benchmark level, and breadth.
 
