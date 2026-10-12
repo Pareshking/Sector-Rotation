@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.metrics import health_summary
+from app.components.metrics import get_metadata, health_summary
 from app.components.theme import mobile_nav, inject_theme, note, page_header, section
 from app.data import load_decisions
 
@@ -71,15 +71,17 @@ Relative Strength**, computed weekly:
 - Price relative `RS_t = P_exposure,t / P_Nifty50,t`, sampled each Friday
 - `MRS_t = 100 × (RS_t / SMA(RS_t, 52) − 1)` — how far the price relative sits above or below its
   own one-year average
-- **RS ratio** `= 1 + MRS/100`. Above 1 means outperforming its own recent norm.
+- **RS ratio** `= 1 + MRS/100`: the RS line relative to its own 52-week moving average.
+  Above 1 means the line sits above that average. It is not a comparison with Nifty 50 over a
+  fixed window: an exposure can trail Nifty over twelve months and still have a ratio above 1.
 - **RS velocity** `=` the 13-week change in MRS. Positive means the outperformance is widening.
 
 | Stage | RS ratio | RS velocity | Reading |
 | --- | --- | --- | --- |
-| **Leading** | ≥ 1 | ≥ 0 | Ahead and pulling further ahead |
-| **Weakening** | ≥ 1 | < 0 | Still ahead but losing ground — leadership fading |
-| **Lagging** | < 1 | < 0 | Behind and falling further behind |
-| **Improving** | < 1 | ≥ 0 | Behind but catching up — an early turn |
+| **Leading** | ≥ 1 | ≥ 0 | RS line above its 52-week average and rising |
+| **Weakening** | ≥ 1 | < 0 | RS line above its 52-week average but falling — leadership fading |
+| **Lagging** | < 1 | < 0 | RS line below its 52-week average and falling |
+| **Improving** | < 1 | ≥ 0 | RS line below its 52-week average but rising — an early turn |
 """
 )
 
@@ -90,7 +92,7 @@ st.markdown(
 | --- | --- |
 | **BUY** | Leading **and** RS ratio > 1 **and** RS velocity > 0 **and** momentum Z > 0 |
 | **REDUCE / EXIT** | Weakening or Lagging **and** RS ratio < 1 **and** RS velocity < 0 |
-| **WATCH / IMPROVING** | Improving stage with RS velocity newly positive |
+| **WATCH / IMPROVING** | Improving stage with RS velocity positive |
 | **WATCH** | Decision-grade, but no full confirmation either way |
 | **DATA UNAVAILABLE** | No authoritative history, or a missing input |
 
@@ -209,12 +211,27 @@ but are never padded, extrapolated, or turned into signals. Missing data is left
 )
 
 if health:
+    # Read from metadata rather than stated: both were once hard-coded and would
+    # have gone on claiming "all total-return" after NSE served a price index.
+    metadata = get_metadata()
+    value_types = list((metadata.get("value_type_by_canonical_exposure") or {}).values())
+    tri = sum(v == "TRI" for v in value_types)
+    value_note = (
+        "all total-return"
+        if value_types and tri == len(value_types)
+        else f"{tri} of {len(value_types)} total-return"
+    )
+    weights = metadata.get("momentum_weights") or {}
+    if weights and len(set(weights.values())) == 1:
+        weight_note = "equal across " + " / ".join(weights)
+    else:
+        weight_note = " / ".join(f"{k} {v:.0%}" for k, v in weights.items()) or "unknown"
     section("Current state")
     st.markdown(
         f"- **{health['decision_grade']}/{health['total']}** decision-grade histories, "
-        f"all total-return\n"
+        f"{value_note}\n"
         f"- **{health['etf_valid']}/{health['etf_total']}** fund price histories ingested\n"
-        f"- Composite weights: equal across 1M / 3M / 6M / 12M\n"
+        f"- Composite weights: {weight_note}\n"
         f"- Last refreshed **{health['updated']}**"
     )
 

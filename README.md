@@ -9,7 +9,7 @@ Live app: <https://dualmomentum.streamlit.app>
 ## Architecture
 
 ```text
-NSE / NiftyIndices  (via jugaad-data adapter)        AMFI / MFAPI / Yahoo
+NSE / NiftyIndices  (via jugaad-data adapter)        NSE / MFAPI / AMFI / Yahoo
           |                                                   |
           v                                                   v
 Universe Registry -> Exposure -> canonical Nifty benchmark   ETF price + NAV
@@ -67,12 +67,18 @@ fetched from the same adapter, so both sides of every relative number share one 
 dividend treatment. Comparing a TRI exposure against a price-index benchmark would overstate
 relative strength by roughly the benchmark's dividend yield.
 
-**ETF market prices.** Configured NSE trading symbols are the canonical ETF identifiers. Yahoo
-Finance `.NS` symbols are adapters, not authoritative ticker definitions. Yahoo is never used
-for a canonical index history.
+**ETF and fund histories.** Configured NSE trading symbols are the canonical ETF identifiers.
+Each vehicle is resolved in a fixed order, and the first source that answers wins
+(`src/data/etf_data.py`):
 
-**ETF NAV fallback.** AMFI's historical NAV endpoint backfills bounded date ranges so illiquid
-or unsupported Yahoo series can be recovered without fabricating prices.
+1. **NSE** traded history, for anything with a trading symbol.
+2. **MFAPI** scheme NAV, for anything with an AMFI scheme code that NSE did not serve.
+3. **AMFI**'s historical NAV endpoint, in one shared download for whatever is left.
+4. **Yahoo Finance**, last, only for instruments no authoritative source could serve.
+
+Yahoo `.NS` symbols are adapters, not authoritative ticker definitions, and Yahoo is never used
+for a canonical index history. The source that served each vehicle is recorded in
+`metadata.json → etf_source_by_symbol`.
 
 ## Decision-grade principles
 
@@ -95,13 +101,20 @@ are prohibited.
 
 ## Daily production refresh
 
-`.github/workflows/data_pipeline.yml` runs every day at **04:00 IST** (`22:30 UTC` the previous
-calendar day), plus on main updates and manually. It runs the live pipeline and commits changed
-`data/processed/` artifacts back to `main`. The pipeline uses the latest available market
-observation, so weekends and NSE holidays naturally reuse the most recent working-day
-observation. The workflow is concurrency-protected, and the `paths-ignore` rule prevents a
-generated-data commit from recursively launching another run. Generated data is the only
-automatic output; source changes are reviewed separately.
+`.github/workflows/data_pipeline.yml` runs on a schedule only: every day at **04:00 IST**
+(`22:30 UTC` the previous calendar day), with a retry at **08:30 IST** (`03:00 UTC`) because NSE,
+MFAPI and AMFI are occasionally unreachable from GitHub's runners at the primary hour. If the
+primary run succeeded, the retry finds no data changes and commits nothing. It can also be run
+manually (`workflow_dispatch`), which is how to refresh after a pipeline change. It does not run
+on pushes: a full run takes about 18 minutes for data that changes once a day, and a quick
+sequence of pushes used to cancel its own refresh.
+
+It runs the live pipeline with `--strict`, so an error-level quality alert stops the run before
+anything is committed, and commits changed `data/processed/` artifacts back to `main`. The
+pipeline uses the latest available market observation, so weekends and NSE holidays naturally
+reuse the most recent working-day observation. The workflow is concurrency-protected (a new run
+cancels one in progress). Because there is no push trigger, a generated-data commit cannot launch
+another run. Generated data is the only automatic output; source changes are reviewed separately.
 
 ## Domain model
 
@@ -143,7 +156,7 @@ history of both RRG axes even though the summary stores only their latest values
 | --- | --- |
 | `BUY` | Leading + RS ratio > 1 + RS velocity > 0 + momentum Z > 0 |
 | `REDUCE / EXIT` | Weakening or Lagging + RS ratio < 1 + RS velocity < 0 |
-| `WATCH / IMPROVING` | Improving stage with RS velocity > 0 — below the benchmark, no longer falling behind |
+| `WATCH / IMPROVING` | Improving stage with RS velocity > 0 — RS line still below its own 52-week moving average, no longer falling further below it |
 | `WATCH` | Decision-grade, but no full confirmation either way |
 | `DATA UNAVAILABLE` | Proxy history, or a missing RS/momentum input |
 
@@ -255,8 +268,19 @@ NSE publishes 139 live indices; the rotation universe is 47. A candidate must cl
   date, so a newly launched index is never ranked on 1-month momentum against names scored on
   four horizons.
 - With the absolute-momentum filter on (classic dual momentum), an exposure whose own trailing
-  12-month return is negative is skipped and that slot earns 0% in cash. No T-bill yield is
-  assumed, which understates the filtered variant rather than flattering it.
+  12-month return is negative is skipped and that slot goes to cash.
+- **Cash earns the risk-free rate**, 6.5% a year (`analytics.RISK_FREE_ANNUAL`, the same rate
+  the Sharpe and Sortino figures assume), accrued monthly on every slot left unfilled for any
+  reason. Indian liquid funds pay roughly that. Cash at 0% was not a conservative simplification:
+  the buyable + entry-rule variant spends about 40% of its slot-months in cash, so that one
+  assumption decided whether it beat Nifty 50.
+- **Only completed months count.** The current, unfinished month is not a rebalance date, so a
+  mid-month run never adds a short period that would then be annualised as a full one. CAGR is
+  annualised by the trading sessions actually covered.
+- **Turnover** is `0.5 × Σ|wₜ − wₜ₋₁|` over every holding and cash, so moving a slot into or out
+  of cash counts at its full size. The book starts in cash, so the first rebalance is 100%.
+- **Sharpe** is `(CAGR − rf) / annualised volatility`, the same definition as the exposure
+  analytics.
 - Minimum window is 12 months; 24, 36 and 60 are also selectable.
 
 **Rolling windows.** A single headline number depends entirely on when the test started and
@@ -365,10 +389,15 @@ it replaces — ETF coverage moved 31 → 29 between two production runs and not
 `--strict` to exit non-zero on any error-level alert; the Data Health page shows them either
 way.
 
-A run also fails the check when the **published dataset is more than 36 hours old**. A GitHub
-Actions timeout reports as "cancelled", which looks identical to a run superseded by concurrency,
-so two nights of failed publishing once passed unnoticed. Checking the symptom — how old the data
-is — catches that regardless of the cause.
+**Freshness is checked outside the pipeline.** A GitHub Actions timeout reports as "cancelled",
+which looks identical to a run superseded by concurrency, so two nights of failed publishing
+once passed unnoticed. The pipeline cannot catch this itself: if it does not run, nothing checks,
+and a run that does finish stamps `last_updated_utc` with the current time just before checking
+it. `.github/workflows/data_freshness_watchdog.yml` therefore runs every 6 hours on its own
+schedule, and `tools/check_freshness.py` (stdlib only, so it still works if the pipeline's
+dependencies break) fails when the committed dataset is **more than 36 hours old**. A failure
+opens one `data-quality` issue per stale episode, not one every 6 hours. Checking the symptom —
+how old the data is — catches the failure regardless of the cause.
 
 `source_counts` is derived from the sources that actually resolved. It previously used a
 hard-coded key list that omitted the adapter serving every exposure, so Data Health reported
@@ -406,13 +435,18 @@ streamlit run app/streamlit_app.py
 ```bash
 python -m pipeline.run_pipeline --mode fixture   # deterministic offline dataset
 python -m pipeline.run_pipeline --mode live      # real ingestion
+pip install -r requirements-dev.txt              # pytest and ruff, not needed by the app
 pytest -q
 ```
 
-Live mode fails closed if canonical coverage is below 100%; it does not silently publish an
-incomplete canonical universe. A five-year window is requested where the source has sufficient
-history — "100% coverage" means every configured canonical index has a valid authoritative
-series, not that a newly launched index is backfilled before its inception date.
+Live mode does not require 100% canonical coverage, and it never fills a gap with a synthetic
+or nearest-category proxy. An exposure without at least 250 authoritative observations is listed
+in `metadata.json → skipped_canonical_exposures`, shown on the Data Health page, and is not
+decision-grade. What stops a run is a missing Nifty 50 benchmark, an invalid universe, or, under
+`--strict`, an error-level quality alert such as canonical coverage falling below the previous
+run's. A five-year window is requested where the source has sufficient history — "100% coverage"
+means every configured canonical index has a valid authoritative series, not that a newly
+launched index is backfilled before its inception date.
 
 Index and ETF ingestion fail independently. To refresh index history alone, reusing the ETF
 artifacts already in `data/processed/` rather than overwriting them with a degraded fetch:

@@ -13,8 +13,15 @@ than none at all:
   horizons.
 * The holding period return is measured from the rebalance close to the next
   rebalance close, so the decision and the return it earns never overlap.
-* Cash earns 0%. No T-bill yield is assumed, which understates the absolute-
-  momentum variant slightly rather than overstating it.
+* Unallocated capital earns the risk-free rate (``RISK_FREE_ANNUAL``, 6.5% a
+  year), the same assumption the Sharpe and Sortino figures use. Indian liquid
+  funds pay roughly that; leaving cash at 0% was not conservative — with 40%
+  of slot-months in cash it decided the sign of the investable result.
+* Only completed months are periods. The current, unfinished month is not a
+  rebalance date unless ``include_partial`` asks for it, and annualisation
+  uses the trading sessions actually covered.
+* Turnover is ``0.5 * sum(|w_t - w_{t-1}|)`` over every holding *and* cash, so
+  moving a slot into or out of cash counts at its full size.
 """
 
 from __future__ import annotations
@@ -24,8 +31,13 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from src.quantitative.analytics import RISK_FREE_ANNUAL
 from src.quantitative.ranking import rank_exposures
-from src.quantitative.relative_strength import mansfield_relative_strength, rs_momentum, rs_stage
+from src.quantitative.relative_strength import (
+    mansfield_relative_strength,
+    rs_momentum,
+    rs_stage,
+)
 from src.quantitative.returns import LOOKBACK_DAYS
 
 TRADING_DAYS = 252
@@ -34,6 +46,7 @@ MIN_WINDOW_MONTHS = 12
 # bought. Beyond this the slot goes to cash rather than drifting into names the
 # model never actually favoured.
 DEFAULT_RANK_DEPTH = 3
+CASH = "__cash__"
 
 
 @dataclass
@@ -49,17 +62,35 @@ class BacktestResult:
         return not self.error and not self.monthly.empty
 
 
-def rebalance_dates(index: pd.DatetimeIndex, months: int, hold_months: int = 1) -> list[pd.Timestamp]:
+def month_is_complete(last_session: pd.Timestamp) -> bool:
+    """Whether the newest session in the data closes its calendar month.
+
+    True once the data reaches the month's last weekday. When that weekday is
+    an NSE holiday the month is treated as unfinished until the next month's
+    first session arrives — a day late, never early.
+    """
+    stamp = pd.Timestamp(last_session).normalize()
+    return stamp >= (stamp + pd.offsets.BMonthEnd(0)).normalize()
+
+
+def rebalance_dates(
+    index: pd.DatetimeIndex, months: int, hold_months: int = 1, include_partial: bool = False
+) -> list[pd.Timestamp]:
     """Period boundaries: the last trading day of every ``hold_months``-th month.
 
     ``months`` is the length of the test; ``hold_months`` is how long a decision
-    is left alone before it is revisited.
+    is left alone before it is revisited. The newest month counts only once it
+    is complete: mid-October, "the October month end" is just the latest
+    close, and treating it as one adds a seven-session period that is then
+    annualised as a full month. ``include_partial`` keeps it, explicitly.
     """
     if len(index) == 0:
         return []
     frame = pd.Series(index, index=index)
     month_ends = frame.groupby([index.year, index.month]).max().sort_values()
     dates = list(pd.DatetimeIndex(month_ends.to_numpy()))
+    if dates and not include_partial and not month_is_complete(dates[-1]):
+        dates = dates[:-1]
     window = dates[-(months + 1):] if len(dates) > months else dates
     hold = max(int(hold_months), 1)
     if hold == 1:
@@ -144,6 +175,8 @@ def run_backtest(
     vehicle_prices: pd.DataFrame | None = None,
     vehicles_by_exposure: dict[str, list[str]] | None = None,
     weights: dict[str, float] | None = None,
+    cash_rate: float = RISK_FREE_ANNUAL,
+    include_partial: bool = False,
 ) -> BacktestResult:
     """Rank periodically, hold the top ``top_n`` exposures equally weighted.
 
@@ -153,7 +186,7 @@ def run_backtest(
     demands the exposure satisfy the live BUY rule. When a top-ranked name
     fails either test the next one is taken, but never past ``max_rank_depth``
     — beyond that the slot goes to cash rather than drifting into names the
-    model never favoured.
+    model never favoured. A cash slot earns ``cash_rate`` a year.
     """
     hold_months = max(int(hold_months), 1)
     if months < MIN_WINDOW_MONTHS:
@@ -166,7 +199,7 @@ def run_backtest(
     common = prices.index.intersection(benchmark.index)
     prices, benchmark = prices.loc[common], benchmark.loc[common]
 
-    dates = rebalance_dates(prices.index, months, hold_months)
+    dates = rebalance_dates(prices.index, months, hold_months, include_partial=include_partial)
     periods_needed = max(MIN_WINDOW_MONTHS // hold_months, 1)
     if len(dates) < periods_needed + 1:
         return BacktestResult(
@@ -189,7 +222,9 @@ def run_backtest(
 
     rows: list[dict[str, object]] = []
     universe: dict[pd.Timestamp, int] = {}
-    previous: set[str] = set()
+    # The book starts entirely in cash, so the first rebalance is a full buy.
+    previous: dict[str, float] = {CASH: 1.0}
+    last_is_partial = include_partial and not month_is_complete(prices.index[-1])
 
     for start, end in zip(dates[:-1], dates[1:]):
         candidates = _eligible(prices, start)
@@ -203,7 +238,7 @@ def run_backtest(
 
         picks: list[str] = []
         skipped: list[str] = []
-        for position, exposure_id in enumerate(ranked.index, start=1):
+        for position, (exposure_id, momentum) in enumerate(ranked["momentum_z"].items(), start=1):
             if len(picks) >= top_n or position > depth:
                 break
             exposure_id = str(exposure_id)
@@ -222,7 +257,9 @@ def run_backtest(
                     continue
                 ratio, velocity = signal
                 stage = rs_stage(ratio, velocity)
-                if not (stage == "Leading" and ratio > 1.0 and velocity > 0):
+                # The live BUY rule in full (app/components/metrics.py): Leading,
+                # RS ratio > 1, RS velocity > 0 *and* momentum Z > 0.
+                if not (stage == "Leading" and ratio > 1.0 and velocity > 0 and momentum > 0):
                     skipped.append(f"{exposure_id}:not BUY")
                     continue
 
@@ -246,12 +283,23 @@ def run_backtest(
             realised[exposure_id] = float(values.iloc[1] / values.iloc[0] - 1.0)
 
         cash_slots = top_n - len(realised)
-        strategy_return = sum(realised.values()) / top_n if top_n else 0.0
+        cash_weight = cash_slots / top_n if top_n else 1.0
+        period_years = (
+            (end - start).days / 365.25
+            if last_is_partial and end == dates[-1]
+            else hold_months / 12.0
+        )
+        cash_return = (1.0 + cash_rate) ** period_years - 1.0
+        strategy_return = (
+            (sum(realised.values()) / top_n if top_n else 0.0) + cash_weight * cash_return
+        )
+        current = {exposure_id: 1.0 / top_n for exposure_id in realised}
+        if cash_weight > 0:
+            current[CASH] = cash_weight
 
         bench_start, bench_end = benchmark.loc[start], benchmark.loc[end]
         benchmark_return = float(bench_end / bench_start - 1.0) if bench_start > 0 else np.nan
 
-        current = set(realised)
         rows.append(
             {
                 "rebalance": start,
@@ -259,10 +307,12 @@ def run_backtest(
                 "holdings": ", ".join(realised) if realised else "cash",
                 "n_held": len(realised),
                 "cash_slots": cash_slots,
+                "cash_weight": cash_weight,
+                "cash_return": cash_return,
                 "strategy_return": strategy_return,
                 "benchmark_return": benchmark_return,
                 "excess_return": strategy_return - benchmark_return,
-                "turnover": len(current ^ previous) / (2 * top_n) if top_n else 0.0,
+                "turnover": turnover(previous, current),
                 "universe": len(candidates),
                 "skipped": "; ".join(skipped[:4]),
                 **{f"holding_{i + 1}": name for i, name in enumerate(realised)},
@@ -275,9 +325,11 @@ def run_backtest(
     if monthly.empty:
         return BacktestResult(error="No period produced a valid holding.")
 
+    # The curve starts at the first invested rebalance, not at the start of the
+    # warm-up year in which nothing could be held.
     equity = pd.DataFrame(
         {
-            "date": [dates[0]] + monthly["period_end"].tolist(),
+            "date": [monthly["rebalance"].iloc[0]] + monthly["period_end"].tolist(),
             "strategy": np.concatenate([[100.0], 100.0 * (1 + monthly["strategy_return"]).cumprod()]),
             "benchmark": np.concatenate(
                 [[100.0], 100.0 * (1 + monthly["benchmark_return"]).cumprod()]
@@ -285,7 +337,11 @@ def run_backtest(
         }
     ).set_index("date")
 
-    stats = _stats(monthly, equity, hold_months)
+    first = pd.Timestamp(monthly["rebalance"].iloc[0])
+    last = pd.Timestamp(monthly["period_end"].iloc[-1])
+    sessions = int(((prices.index > first) & (prices.index <= last)).sum())
+    stats = _stats(monthly, equity, hold_months, sessions=sessions)
+    stats["cash_rate"] = float(cash_rate)
     stats["requested_months"] = float(months)
     # The first rebalances produce nothing: no exposure has the 252 days of
     # history the ranking needs, so the window's opening year is warm-up.
@@ -298,16 +354,39 @@ def run_backtest(
     )
 
 
+def turnover(previous: dict[str, float], current: dict[str, float]) -> float:
+    """One-way turnover, ``0.5 * sum(|w_t - w_{t-1}|)``, with cash as a position.
+
+    {A, B} -> {A, cash} sells half the book: 0.5. Counting only the names that
+    changed, as before, called it 0.25.
+    """
+    keys = set(previous) | set(current)
+    return 0.5 * sum(abs(current.get(k, 0.0) - previous.get(k, 0.0)) for k in keys)
+
+
 def _max_drawdown(curve: pd.Series) -> float:
     return float((curve / curve.cummax() - 1.0).min())
 
 
-def _stats(monthly: pd.DataFrame, equity: pd.DataFrame, hold_months: int = 1) -> dict[str, float]:
+def _stats(
+    monthly: pd.DataFrame,
+    equity: pd.DataFrame,
+    hold_months: int = 1,
+    sessions: int | None = None,
+    risk_free: float = RISK_FREE_ANNUAL,
+) -> dict[str, float]:
+    """Summary statistics over the periods that actually held something.
+
+    CAGR is annualised by the trading sessions covered (``sessions / 252``)
+    rather than by counting periods, so a short period cannot pass for a full
+    one. Sharpe is ``(CAGR - rf) / annualised volatility`` with the same
+    risk-free rate as ``analytics.sharpe``.
+    """
     strategy = monthly["strategy_return"].astype(float)
     benchmark = monthly["benchmark_return"].astype(float)
     n = len(strategy)
     periods_per_year = 12.0 / max(hold_months, 1)
-    years = n / periods_per_year
+    years = sessions / TRADING_DAYS if sessions else n / periods_per_year
     total_s = float(equity["strategy"].iloc[-1] / 100.0 - 1.0)
     total_b = float(equity["benchmark"].iloc[-1] / 100.0 - 1.0)
     vol_s = float(strategy.std(ddof=0) * np.sqrt(periods_per_year)) if n > 1 else float("nan")
@@ -325,7 +404,11 @@ def _stats(monthly: pd.DataFrame, equity: pd.DataFrame, hold_months: int = 1) ->
         "benchmark_cagr": cagr_b,
         "volatility": vol_s,
         "benchmark_volatility": vol_b,
-        "sharpe": float(cagr_s / vol_s) if vol_s and vol_s == vol_s and vol_s > 0 else float("nan"),
+        "sharpe": _sharpe(cagr_s, vol_s, risk_free),
+        "benchmark_sharpe": _sharpe(cagr_b, vol_b, risk_free),
+        "risk_free": float(risk_free),
+        "sessions": float(sessions or 0),
+        "years": float(years),
         "max_drawdown": _max_drawdown(equity["strategy"]),
         "benchmark_max_drawdown": _max_drawdown(equity["benchmark"]),
         "hit_rate": float((strategy > benchmark).mean()),
@@ -335,6 +418,12 @@ def _stats(monthly: pd.DataFrame, equity: pd.DataFrame, hold_months: int = 1) ->
         "avg_turnover": float(monthly["turnover"].mean()),
         "cash_months": float((monthly["cash_slots"] > 0).sum()),
     }
+
+
+def _sharpe(growth: float, volatility: float, risk_free: float) -> float:
+    if not np.isfinite(growth) or not np.isfinite(volatility) or volatility <= 0:
+        return float("nan")
+    return float((growth - risk_free) / volatility)
 
 
 def period_split(result: BacktestResult, boundary: str = "2025-01-01") -> pd.DataFrame:

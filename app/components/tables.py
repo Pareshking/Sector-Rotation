@@ -56,7 +56,7 @@ COLUMNS: dict[str, tuple[str, str, str]] = {
     "decision_eligible": ("Decision-grade", "bool", "Has an authoritative history"),
     "tradeable": ("Buyable", "bool", "A listed ETF that trades, or an open-ended index fund"),
     "momentum_z": ("Momentum Z", "z", "Cross-sectional Z of relative returns · 0 = universe average"),
-    "rs_ratio": ("RS ratio", "ratio3", "1.00 = in line with Nifty 50"),
+    "rs_ratio": ("RS ratio", "ratio3", "RS line relative to its own 52-week moving average; 1.00 = at the average"),
     "rs_momentum": ("RS vel", "signed1", "13-week change in Mansfield RS"),
     "rs_trend": ("RS trend", "spark", "Mansfield relative strength, last 26 weeks"),
     "return_1M": ("1M", PERCENT, "Index return over the window"),

@@ -25,10 +25,12 @@ _LOGO_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 40">
     Dual Momentum
   </text>
 </svg>"""
+# st.logo only accepts an absolute http(s) link, so the root is spelled out.
+# The default page is served at "/"; "/Overview" answers "Page not found".
 st.logo(
     f"data:image/svg+xml;base64,{base64.b64encode(_LOGO_SVG).decode()}",
     size="medium",
-    link="https://dualmomentum.streamlit.app/Overview",
+    link="https://dualmomentum.streamlit.app/",
 )
 
 ROOT = Path(__file__).resolve().parents[1]

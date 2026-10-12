@@ -181,8 +181,9 @@ def _analysis_note(row: dict[str, object], action: str) -> str:
         )
     if action == "WATCH / IMPROVING":
         return (
-            f"{stage}; RS ratio {ratio} is still below the benchmark but RS velocity {velocity} "
-            f"has turned positive. This is an early turn, not a confirmed BUY. {rank_text}."
+            f"{stage}; RS ratio {ratio}: the RS line is still below its own 52-week moving "
+            f"average, but RS velocity {velocity} has turned positive. This is an early turn, "
+            f"not a confirmed BUY. {rank_text}."
         )
     if action == "DATA UNAVAILABLE":
         return (
@@ -191,8 +192,9 @@ def _analysis_note(row: dict[str, object], action: str) -> str:
         )
     if stage == "Weakening":
         return (
-            f"{stage}; RS ratio {ratio} is still above the benchmark but RS velocity {velocity} "
-            f"has rolled over. Leadership is fading before the exit rule triggers. {rank_text}."
+            f"{stage}; RS ratio {ratio}: the RS line is still above its own 52-week moving "
+            f"average, but RS velocity {velocity} has rolled over. Leadership is fading before the "
+            f"exit rule triggers. {rank_text}."
         )
     return f"{stage}; the full BUY or REDUCE confirmation is not present. {rank_text}."
 
@@ -238,8 +240,9 @@ def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
     valid = ratio.notna() & velocity.notna() & momentum.notna()
     buy = (~proxy) & valid & stage.eq("Leading") & ratio.gt(1.0) & velocity.gt(0) & momentum.gt(0)
     reduce = (~proxy) & valid & stage.isin(["Weakening", "Lagging"]) & ratio.lt(1.0) & velocity.lt(0)
-    # An Improving exposure is by definition below the benchmark (rs_stage puts
-    # rs_ratio < 1 with rising momentum here), so the previous ``ratio > 1``
+    # An Improving exposure by definition has its RS line below its own 52-week
+    # moving average (rs_stage puts rs_ratio < 1 with rising momentum here), so the
+    # previous ``ratio > 1``
     # clause could never be satisfied and this bucket never rendered.
     improving = (~proxy) & valid & stage.eq("Improving") & velocity.gt(0)
 

@@ -87,3 +87,122 @@ def test_fresh_publication_passes():
 def test_unparseable_timestamp_does_not_crash_the_check():
     report = check_dataset({"last_updated_utc": "not a date"}, {}, _prices())
     assert report.ok
+
+
+# --------------------------------------------------------------------------- #
+# Value types: what kind of return each series carries
+# --------------------------------------------------------------------------- #
+def _typed(benchmark: str | None = "TRI", **exposures: str) -> dict:
+    meta = {"value_type_by_canonical_exposure": exposures or {"auto": "TRI", "bank": "TRI"}}
+    if benchmark is not None:
+        meta["benchmark_value_type"] = benchmark
+    return meta
+
+
+def _checks(report, severity: str) -> set[str]:
+    return {a["check"] for a in report.alerts if a["severity"] == severity}
+
+
+def test_a_consistent_total_return_dataset_is_clean():
+    report = check_dataset(_typed(), _typed(), _prices())
+    assert report.ok
+    assert [a["check"] for a in report.alerts] == ["clean"]
+
+
+def test_benchmark_falling_from_tri_to_close_is_an_error():
+    """Nifty 50 alone switching to the price index inflates all 47 relative returns."""
+    report = check_dataset(
+        _typed("CLOSE", auto="CLOSE", bank="CLOSE"), _typed("TRI", auto="CLOSE", bank="CLOSE"), _prices()
+    )
+    assert not report.ok
+    assert "benchmark_value_type_regression" in _checks(report, "error")
+    assert any("TRI to CLOSE" in a["message"] for a in report.errors)
+
+
+def test_benchmark_gaining_return_content_is_only_a_warning():
+    report = check_dataset(_typed("TRI"), _typed("CLOSE"), _prices())
+    assert "benchmark_value_type_changed" in _checks(report, "warning")
+    assert "benchmark_value_type_regression" not in _checks(report, "error")
+
+
+def test_an_unknown_benchmark_value_type_is_an_error():
+    report = check_dataset(_typed("UNKNOWN"), _typed("TRI"), _prices())
+    assert not report.ok
+    assert "benchmark_value_type_unknown" in _checks(report, "error")
+
+
+def test_a_price_benchmark_under_total_return_exposures_is_an_error_even_on_a_first_run():
+    """No previous run is needed to know the two sides do not match."""
+    report = check_dataset(_typed("CLOSE", auto="TRI", bank="CLOSE"), None, _prices())
+    assert not report.ok
+    mismatch = [a for a in report.errors if a["check"] == "value_type_mismatch"]
+    assert mismatch and "auto" in mismatch[0]["message"] and "bank" not in mismatch[0]["message"]
+
+
+def test_a_nav_exposure_against_a_price_benchmark_is_a_mismatch():
+    report = check_dataset(_typed("CLOSE", auto="NAV", bank="CLOSE"), _typed("CLOSE", auto="NAV", bank="CLOSE"), _prices())
+    assert "value_type_mismatch" in _checks(report, "error")
+
+
+def test_exposures_below_a_total_return_benchmark_are_not_a_mismatch():
+    """A price-index exposure is understated, never inflated, against a TRI benchmark."""
+    report = check_dataset(_typed("TRI", auto="CLOSE", bank="NAV"), None, _prices())
+    assert "value_type_mismatch" not in _checks(report, "error")
+
+
+def test_an_exposure_falling_from_tri_to_close_is_an_error():
+    report = check_dataset(_typed("TRI", auto="CLOSE", bank="TRI"), _typed("TRI", auto="TRI", bank="TRI"), _prices())
+    assert not report.ok
+    regression = [a for a in report.errors if a["check"] == "value_type_regression"]
+    assert regression and "auto TRI→CLOSE" in regression[0]["message"]
+    assert "bank" not in regression[0]["message"]
+
+
+def test_an_exposure_falling_from_tri_to_nav_is_an_error():
+    report = check_dataset(_typed("TRI", auto="NAV", bank="TRI"), _typed("TRI", auto="TRI", bank="TRI"), _prices())
+    assert "value_type_regression" in _checks(report, "error")
+
+
+def test_an_exposure_gaining_return_content_is_informational():
+    report = check_dataset(_typed("TRI", auto="TRI", bank="TRI"), _typed("TRI", auto="CLOSE", bank="TRI"), _prices())
+    assert report.ok
+    assert "value_type_upgraded" in _checks(report, "info")
+
+
+def test_an_exposure_new_this_run_is_not_a_regression():
+    report = check_dataset(_typed("TRI", auto="TRI", bank="CLOSE"), _typed("TRI", auto="TRI"), _prices())
+    assert "value_type_regression" not in _checks(report, "error")
+
+
+def test_metadata_without_a_benchmark_type_is_not_judged():
+    """Metadata written before the benchmark type was recorded must not fail retroactively."""
+    report = check_dataset(_typed(None), _typed(None), _prices())
+    assert report.ok
+
+
+def test_a_value_type_regression_fails_the_strict_pipeline(monkeypatch, tmp_path):
+    """--strict must turn the regression into a failed run, after the dataset is written."""
+    import json
+
+    import pipeline.run_pipeline as rp
+
+    monkeypatch.setattr(rp, "OUTPUT", tmp_path)
+    previous = {"benchmark_value_type": "TRI", "value_type_by_canonical_exposure": {}}
+    (tmp_path / "metadata.json").write_text(json.dumps(previous), encoding="utf-8")
+
+    real_fixture = rp.build_fixture
+
+    def close_benchmark(registry):
+        prices, benchmark, etfs, etf_prices, health = real_fixture(registry, days=400)
+        health["benchmark_value_type"] = "CLOSE"
+        health["value_type_by_canonical_exposure"] = {k: "CLOSE" for k in health["value_type_by_canonical_exposure"]}
+        return prices, benchmark, etfs, etf_prices, health
+
+    monkeypatch.setattr(rp, "build_fixture", close_benchmark)
+    import pytest
+
+    with pytest.raises(SystemExit, match="Data-quality check failed"):
+        rp.run("fixture", strict=True)
+    written = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    assert written["benchmark_value_type"] == "CLOSE"
+    assert any(a["check"] == "benchmark_value_type_regression" for a in written["quality_alerts"])
