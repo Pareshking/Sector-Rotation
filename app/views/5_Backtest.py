@@ -105,12 +105,21 @@ cost_bps = extra[2].segmented_control(
     "Cost per side (bps)", [0, 10, 25, 50], default=int(live_config.cost_bps_per_side), key="bt_cost",
     help="Charged on every unit of weight bought or sold at each fill.",
 )
-absolute_filter = st.toggle(
+toggles = st.columns(2)
+absolute_filter = toggles[0].toggle(
     "Cash hurdle (dual momentum)",
     value=live_config.absolute_momentum_filter == "dual_momentum_cash_hurdle",
     key="bt_abs",
-    help=f"Hold an exposure only while its own 12-month return beats cash "
-    f"({live_config.risk_free_rate_annual:.1%}); otherwise its slot sits in cash, earning that rate.",
+    help="Hold an exposure only while its own 12-month return beats the liquid fund's 12-month "
+    f"return; otherwise its slot sits in cash, earning what the fund earned "
+    f"({live_config.risk_free_rate_annual:.1%} before the fund's NAV history).",
+)
+exclude_backcalculated = toggles[1].toggle(
+    "Exclude back-calculated index history",
+    value=live_config.backfill_policy == "exclude_prelaunch",
+    key="bt_backfill",
+    help="An index is not eligible before its NSE launch date. Its earlier values were computed "
+    "after the fact and could never have been traded on.",
 )
 
 top_n = int(top_n or live_config.target_holdings_n)
@@ -121,6 +130,7 @@ config = backtest_config(
     absolute_filter=absolute_filter,
     investable_only=investable_only,
     cost_bps=float(cost_bps if cost_bps is not None else live_config.cost_bps_per_side),
+    exclude_backcalculated=exclude_backcalculated,
 )
 months = None if months_choice in (None, "All") else int(months_choice)
 is_live = config.config_hash == live_config.config_hash and months is None and (category or "All") == "All"
@@ -235,9 +245,9 @@ cash_periods = float((result.monthly["cash_slots"] > 0).mean())
 if cash_periods > 0:
     note(
         f"<b>{cash_periods:.0%} of periods left at least one slot in cash</b>, because a top-ranked "
-        "exposure failed the cash hurdle. Investability is judged from each vehicle's own price "
-        "history, not from the fact that it exists today — most of these ETFs and index funds "
-        "launched in 2024–25.",
+        "exposure failed the cash hurdle. Investability is judged from each vehicle's recorded "
+        "inception date (its first published NAV), not from the fact that it exists today — most "
+        "of these ETFs and index funds launched in 2024–25.",
         tone="amber",
     )
 if not investable_only:
@@ -428,7 +438,8 @@ st.download_button(
 section("How to read this")
 hurdle_text = (
     f" A slot is held only while the exposure's own 12-month return beats cash "
-    f"({config.risk_free_rate_annual:.1%}); a top name that fails leaves its slot in cash."
+    f"— the liquid fund's 12-month return, or {config.risk_free_rate_annual:.1%} before its NAV "
+    "history — and a top name that fails leaves its slot in cash."
     if config.absolute_momentum_filter == "dual_momentum_cash_hurdle"
     else " The cash hurdle is off."
 )
@@ -441,14 +452,20 @@ note(
     f"Each slot is 1/{config.target_holdings_n} of the book."
     + hurdle_text
     + (
-        " A pick must have had a buyable vehicle on that date, judged from the vehicle's own price "
-        "history."
+        " A pick must have had a buyable vehicle on that date, judged from its recorded inception "
+        "date."
         if config.require_investable
         else " Every index is eligible, buyable or not."
     )
     + " Trades fill at the next session's close, each period runs from one fill to the next, "
-    f"and every unit of weight traded costs {config.cost_bps_per_side:g} bps. Cash earns "
-    f"{config.risk_free_rate_annual:.1%}, and only completed months are counted."
+    f"and every unit of weight traded costs {config.cost_bps_per_side:g} bps. Cash earns what the "
+    f"liquid fund's NAV earned between fills ({config.risk_free_rate_annual:.1%} before its history), "
+    "and only completed months are counted."
+    + (
+        " Back-calculated index history is excluded: an index is not eligible before its NSE launch date."
+        if config.backfill_policy == "exclude_prelaunch"
+        else " Index history before each index's NSE launch date (back-calculated) is included."
+    )
 )
 note(
     f"<b>What this is not.</b> The {config.cost_bps_per_side:g} bps per side covers brokerage and "

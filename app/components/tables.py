@@ -56,7 +56,7 @@ COLUMNS: dict[str, tuple[str, str, str]] = {
     "analysis_note": ("Note", "text", ""),
     "shares_index_with": ("Shares index with", "text", "Same underlying index as this exposure"),
     "decision_eligible": ("Decision-grade", "bool", "Has the authoritative 12-month history the score needs"),
-    "tradeable": ("Buyable", "bool", "A mapped ETF or index fund had a price on the decision date"),
+    "tradeable": ("Buyable", "bool", "A mapped ETF or index fund had incepted by the decision date (recorded inception date)"),
     "momentum_z": ("Score", "z", "Strategy score: weighted z-scores of the 1M, 3M-1M, 6M-3M and 12M-6M returns · 0 = universe average"),
     "rs_ratio": ("RS ratio", "ratio3", "RS line relative to its own 52-week moving average; 1.00 = at the average"),
     "rs_momentum": ("RS vel", "signed1", "13-week change in Mansfield RS"),

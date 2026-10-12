@@ -61,6 +61,18 @@ class ScoreSpec(BaseModel):
         return {k: float(value.get(k, 0.0)) / total for k in SEGMENTS}
 
 
+class CashProxySpec(BaseModel):
+    """The liquid fund whose NAV is the cash return: hurdle and accrual both."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: Literal["mfapi"] = "mfapi"
+    scheme_code: int = Field(gt=0)
+    # The exact AMFI scheme name. Ingestion refuses a series whose name differs,
+    # so a wrong code (an equity fund, say) can never become the cash return.
+    name: str = Field(min_length=1)
+
+
 class StrategyConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -73,8 +85,13 @@ class StrategyConfig(BaseModel):
     absolute_momentum_filter: Literal["dual_momentum_cash_hurdle", "none"] = (
         "dual_momentum_cash_hurdle"
     )
+    # Fallback cash return, used only before the cash proxy's NAV history begins.
     risk_free_rate_annual: float = Field(0.065, ge=0.0, le=0.5)
+    cash_proxy: CashProxySpec | None = None
     require_investable: bool = True
+    # "include": score back-calculated index history like any other.
+    # "exclude_prelaunch": an index is not eligible before its NSE launch date.
+    backfill_policy: Literal["include", "exclude_prelaunch"] = "include"
     execution_fill: Literal["t_plus_1_close"] = "t_plus_1_close"
     cost_bps_per_side: float = Field(25.0, ge=0.0, le=500.0)
 
@@ -99,7 +116,7 @@ class StrategyConfig(BaseModel):
 
     @property
     def cash_hurdle_12m(self) -> float:
-        """The 12-month cash return an exposure must beat."""
+        """The constant 12-month cash return: the fallback before the proxy has a year of NAVs."""
         return float(self.risk_free_rate_annual)
 
 

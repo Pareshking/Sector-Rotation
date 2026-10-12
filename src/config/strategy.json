@@ -1,6 +1,6 @@
 {
-  "version": "1.0",
-  "description": "Monthly sector and theme rotation. Rank by a non-overlapping momentum composite that keeps the most recent month at full weight; hold the top 2 with a retention buffer at rank 4; hold an exposure only while its 12-month return beats cash; trade the session after the signal; charge 25 bps per side.",
+  "version": "1.1",
+  "description": "Monthly sector and theme rotation. Rank by a non-overlapping momentum composite that keeps the most recent month at full weight; hold the top 2 with a retention buffer at rank 4; hold an exposure only while its 12-month return beats the 12-month return of a liquid fund; trade the session after the signal; charge 25 bps per side.",
   "target_holdings_n": 2,
   "retention_buffer_m": 4,
   "rebalance_months": 1,
@@ -19,7 +19,13 @@
   },
   "absolute_momentum_filter": "dual_momentum_cash_hurdle",
   "risk_free_rate_annual": 0.065,
+  "cash_proxy": {
+    "source": "mfapi",
+    "scheme_code": 118701,
+    "name": "Nippon India Liquid Fund - Direct Plan - Growth Option"
+  },
   "require_investable": true,
+  "backfill_policy": "include",
   "execution_fill": "t_plus_1_close",
   "cost_bps_per_side": 25
 }

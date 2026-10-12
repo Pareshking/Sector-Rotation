@@ -390,3 +390,51 @@ def test_rrg_history_is_backward_looking():
         if a is None or b is None:
             continue
         assert abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2: cash from the liquid fund's NAV, and back-calculated history
+# --------------------------------------------------------------------------- #
+def _liquid_nav(annual: float, start: str) -> pd.Series:
+    days = pd.date_range(start, "2026-12-31", freq="D")
+    return pd.Series(1000 * (1 + annual) ** ((days - days[0]).days / 365.25), index=days)
+
+
+def test_cash_accrues_what_the_liquid_fund_earned_between_fills():
+    prices, benchmark = _falling()
+    nav = _liquid_nav(0.071, "2020-01-01")
+    result = run_backtest(prices, benchmark, _config(cost_bps_per_side=0), months=12, cash_nav=nav)
+    assert result.ok
+    for row in result.monthly.itertuples():
+        expected = nav.loc[:row.period_end].iloc[-1] / nav.loc[:row.fill_date].iloc[-1] - 1
+        assert row.cash_source == "nav"
+        assert abs(row.cash_return - expected) < 1e-12
+        assert abs(row.strategy_return - expected) < 1e-12  # fully in cash
+
+
+def test_periods_before_the_funds_history_use_the_constant():
+    prices, benchmark = _falling()
+    nav = _liquid_nav(0.071, "2026-03-01")
+    result = run_backtest(prices, benchmark, _config(cost_bps_per_side=0), months=12, cash_nav=nav)
+    early = result.monthly[pd.to_datetime(result.monthly["fill_date"]) < pd.Timestamp("2026-03-01")]
+    late = result.monthly[pd.to_datetime(result.monthly["fill_date"]) >= pd.Timestamp("2026-03-01")]
+    assert not early.empty and not late.empty
+    assert (early["cash_source"] == "constant").all()
+    assert np.allclose(early["cash_return"], MONTHLY_CASH)
+    assert (late["cash_source"] == "nav").all()
+
+
+def test_excluding_back_calculated_history_removes_pre_launch_picks():
+    """With the policy on, an index is never held before its NSE launch date."""
+    prices, benchmark = _panel(columns=4)
+    launch = pd.Timestamp("2026-01-15")
+    meta = {
+        e: ExposureMeta(e, e, "sector", prices.index[0], launch_date=launch if e == "exp3" else None)
+        for e in prices
+    }
+    config = _config(require_investable=True, absolute_momentum_filter="none")
+    included = run_backtest(prices, benchmark, config, meta)
+    excluded = run_backtest(prices, benchmark, config.replace(backfill_policy="exclude_prelaunch"), meta)
+    before = lambda r: r.monthly[pd.to_datetime(r.monthly["rebalance"]) < launch]
+    assert before(included)["holdings"].str.contains("exp3").any(), "scenario must pick exp3 pre-launch"
+    assert not before(excluded)["holdings"].str.contains("exp3").any()

@@ -17,10 +17,13 @@ Universe Registry -> Exposure -> canonical Nifty benchmark   ETF price + NAV
           +--> explicit ETF/NAV promotion (mapped exposures only)
           |
           v
-Prepared Parquet + metadata.json
+data/raw/{index,vehicle}/{id}/{yyyy}.parquet   append-only archive, extended incrementally
           |
           v
-src/config/strategy.json  (strategy v1.0: N, buffer M, score, hurdle, fill, cost)
+Prepared Parquet + metadata.json  (each file checked against src/data/contracts.py)
+          |
+          v
+src/config/strategy.json  (strategy v1.1: N, buffer M, score, cash hurdle, fill, cost)
           |
           v
 src/portfolio  — pure, no I/O, no Streamlit
@@ -84,6 +87,19 @@ Yahoo `.NS` symbols are adapters, not authoritative ticker definitions, and Yaho
 for a canonical index history. The source that served each vehicle is recorded in
 `metadata.json → etf_source_by_symbol`.
 
+**Authoritative dates.** `data/universe/universe.json` records, for every index, its NSE
+`launch_date` and `base_date` (from the index's NSE Indices factsheet) and, for every ETF and
+index fund, its `inception_date` (its first published NAV in AMFI's record, via MFAPI), each
+with its source. `tools/refresh_universe_dates.py` fills them; it is run by hand and its diff
+reviewed like code. A date the source does not state is left empty and reported, never guessed:
+NSE's factsheets for Nifty IT, MNC, PSE and Services give no launch date, and SBI Nifty IT ETF
+has no NAV history in AMFI's record.
+
+**Cash.** The cash return is the NAV of the liquid fund named in `strategy.json → cash_proxy`
+(Nippon India Liquid Fund – Direct Plan – Growth Option, AMFI scheme 118701), ingested with the
+other histories into `cash_nav.parquet`. Ingestion refuses the series unless AMFI's scheme name
+matches the configured name exactly, so a wrong scheme code cannot become the cash return.
+
 ## Decision-grade principles
 
 1. **No synthetic benchmark proxies.** A benchmark must represent the declared exposure.
@@ -114,7 +130,8 @@ on pushes: a full run takes about 18 minutes for data that changes once a day, a
 sequence of pushes used to cancel its own refresh.
 
 It runs the live pipeline with `--strict`, so an error-level quality alert stops the run before
-anything is committed, and commits changed `data/processed/` artifacts back to `main`. The
+anything is committed, and commits changed `data/processed/` artifacts and the `data/raw/`
+archive back to `main`. The
 pipeline uses the latest available market observation, so weekends and NSE holidays naturally
 reuse the most recent working-day observation. The workflow is concurrency-protected (a new run
 cancels one in progress). Because there is no push trigger, a generated-data commit cannot launch
@@ -188,13 +205,21 @@ is implemented and selectable in `strategy.json`. v1.0 does not use it.
 decided. The dashboard, the alert tool and every rebalance of the backtest call it:
 
 1. **Eligible** — scorable and, with `require_investable`, buyable on the date: a mapped ETF or
-   index fund already had a price. Eligible exposures are ranked by score.
+   index fund had incepted by it, by its recorded `inception_date`. Buyability is never inferred
+   from the nightly price download, so a fetch that fails one night cannot make a fund that
+   launched years ago unbuyable and sell it. Eligible exposures are ranked by score.
 2. **Retention buffer** — a holding is kept while its rank is ≤ `retention_buffer_m` (4).
 3. **Entry** — a vacant slot is filled only from ranks ≤ `target_holdings_n` (2), best first.
 4. **Cash hurdle** (`dual_momentum_cash_hurdle`) — an exposure is held only while its own
-   12-month return beats the 12-month cash return (6.5%). A top-ranked name that fails leaves its
-   slot in cash; it is never handed to a weaker name.
+   12-month return beats what the liquid fund returned over the same 12 months (the constant 6.5%
+   only before the fund's NAV history). A top-ranked name that fails leaves its slot in cash; it is
+   never handed to a weaker name.
 5. **Weights** — each slot is 1/N of the book; unfilled slots are cash.
+6. **Back-calculated history** (`backfill_policy`) — before an index's NSE launch date its values
+   were computed after the fact. v1.1 keeps them (`include`); `exclude_prelaunch` makes an index
+   ineligible before its launch. 24 of the 47 indices launched inside the five-year panel —
+   Telecom, Capital Goods, Power, Consumer Services and Sugar & Ethanol only in June 2026 — so the
+   Backtest page shows the strategy both ways.
 
 | Action | Meaning |
 | --- | --- |
@@ -221,9 +246,9 @@ generated before the rule existed.
 
 ### Tradeability
 
-An exposure with no instrument is research, not a position, so strategy v1.0 never holds one:
-with `require_investable` on, only exposures whose mapped ETF or index fund had a price on the
-decision date are eligible. Elsewhere in the app, exposures without one carry a `no fund` badge,
+An exposure with no instrument is research, not a position, so the strategy never holds one:
+with `require_investable` on, only exposures whose mapped ETF or index fund had incepted by the
+decision date (by its recorded `inception_date`) are eligible. Elsewhere in the app, exposures without one carry a `no fund` badge,
 and a **Buyable only** filter on the Dashboard and Screener keeps just the ones you can act on.
 
 Two vehicle types are tracked separately, because they are bought differently. An **ETF** trades
@@ -312,8 +337,9 @@ every month-end close — the same chain as the dashboard — and does the accou
 - **Costs are charged.** `cost_bps_per_side` (25) on every unit of weight bought or sold, cash
   legs excluded: `cost = bps × Σ|w − w_prior|`, deducted at the fill. The Backtest page reports
   gross, costs and net.
-- **Cash earns the risk-free rate**, 6.5% a year (`risk_free_rate_annual`), the same rate as the
-  hurdle and the Sharpe ratio.
+- **Cash earns what the liquid fund earned** between the two fills — the same NAV series as the
+  hurdle. The constant (`risk_free_rate_annual`, 6.5%) is used only for periods that start before
+  the fund's NAV history; Sharpe still uses the constant.
 - **Only completed months count.** The current, unfinished month is not a rebalance date, and
   CAGR is annualised by the trading sessions actually covered.
 - **Turnover** is `0.5 × Σ|wₜ − wₜ₋₁|` over every holding and cash. The book starts in cash.
@@ -356,10 +382,37 @@ chosen in 2026. Treat the record as a check on the rules, not as evidence of an 
 | `index_prices.parquet` | Daily canonical index levels per exposure plus the Nifty 50 benchmark in `__benchmark__` — required by the Backtest page |
 | `etf_universe.parquet` | ETF metadata per exposure |
 | `etf_prices.parquet` | Daily ETF price/NAV history |
-| `metadata.json` | Coverage, provenance, value types (including `benchmark_value_type`), fetch errors, validation warnings, quality alerts, and the `strategy` config with its `strategy_version` and `strategy_hash` |
+| `cash_nav.parquet` | Daily NAV of the cash proxy (the liquid fund) |
+| `portfolio_target.parquet` | The latest decision: one row per order (BUY / HOLD / TRIM / SELL) plus a `CASH` row; weights sum to 1 |
+| `metadata.json` | Coverage, provenance, value types (including `benchmark_value_type`), ingestion report, restatements, fetch errors, validation warnings, quality alerts, the cash proxy, the target portfolio summary, and the `strategy` config with its `strategy_version` and `strategy_hash` |
 
-The target portfolio is not stored: the app and the alert tool build it from these files with
-`src/portfolio`, so it can never disagree with the code that tested it.
+**Every file has a contract** (`src/data/contracts.py`): required columns, types, ranges, a
+sorted unique date index, the benchmark complete, target weights summing to 1, a timezone-aware
+timestamp. The pipeline checks all of them before writing anything and stops, listing every
+breach, if one fails — a malformed dataset is never published.
+
+`portfolio_target.parquet` is a published record, not an input: the app and the alert tool
+rebuild the target from the price files with `src/portfolio`, so it can never disagree with the
+code that tested it.
+
+## Raw archive
+
+`data/raw/` is an append-only store, one Parquet file per series per calendar year:
+`data/raw/index/{exposure_id}/{yyyy}.parquet` for NSE index levels (the benchmark is
+`nifty-50`), `data/raw/vehicle/{scheme_code}/{yyyy}.parquet` for funds and the cash proxy. Rows
+carry the value, its type (TRI / CLOSE / NAV), its source and when it was fetched.
+
+- **Incremental.** An index series is fetched only from 10 stored sessions before its last
+  stored session (`--overlap`). An empty store is seeded once with `--seed-years` (5) of
+  history; after that the archive only grows — nothing falls off the start.
+- **Restatements are kept, not overwritten.** The overlap is re-fetched on purpose. A value that
+  changed is appended as a new version with a later `fetched_at`; reads use the latest. Each one
+  is listed in `metadata.json → restatements` and raised as a warning in `quality_alerts`.
+- **No splicing.** A series stored as TRI is only ever extended with TRI. A fetch whose overlap
+  mostly disagrees by more than 2% is a different series and is refused.
+- **Failures fall back to the store.** A series whose fetch fails keeps its stored history and
+  is reported in `metadata.json → ingest`. Fund histories are merged on every run (MFAPI returns a
+  fund's whole history in one request), so a fund that fails one night keeps its history too.
 
 If `index_prices.parquet` is absent the Backtest page explains what is missing and the rest of
 the app is unaffected.
@@ -393,11 +446,10 @@ zero canonical sources while 43 were present.
 ETF coverage moves run to run as Yahoo and MFAPI availability changes; INFRABEES, previously the
 standing gap, now resolves via MFAPI. The Data Health page lists whatever is currently skipped.
 
-**Fund histories now feed decisions.** Eligibility is judged from each vehicle's own price
-history, so a fund whose history drops out of a night's fetch can make its exposure ineligible —
-and a holding ineligible is sold. Eleven of the 34 buyable exposures currently rely on a single
-fund's history. Until launch dates are recorded independently of the nightly fetch, an
-`etf_valid_series` regression in `quality_alerts` deserves a look before acting on a SELL.
+Fund price gaps do not affect decisions: buyability comes from recorded inception dates. The
+nightly prices are used only as evidence against those dates — a vehicle whose prices start more
+than 10 days before its recorded inception raises an `inception_conflict` warning, because the
+date then needs a reviewed correction.
 
 ## Alerts
 
@@ -427,7 +479,8 @@ streamlit run app/streamlit_app.py
 
 ```bash
 python -m pipeline.run_pipeline --mode fixture   # deterministic offline dataset
-python -m pipeline.run_pipeline --mode live      # real ingestion
+python -m pipeline.run_pipeline --mode live      # real ingestion into data/raw, then data/processed
+python tools/refresh_universe_dates.py           # refresh launch/base/inception dates; review the diff
 pip install -r requirements-dev.txt              # pytest and ruff, not needed by the app
 pytest -q
 ```
@@ -437,9 +490,10 @@ or nearest-category proxy. An exposure without at least 250 authoritative observ
 in `metadata.json → skipped_canonical_exposures`, shown on the Data Health page, and is not
 decision-grade. What stops a run is a missing Nifty 50 benchmark, an invalid universe, or, under
 `--strict`, an error-level quality alert such as canonical coverage falling below the previous
-run's. A five-year window is requested where the source has sufficient history — "100% coverage"
-means every configured canonical index has a valid authoritative series, not that a newly
-launched index is backfilled before its inception date.
+run's, or any artifact failing its contract. A series the archive has never seen is seeded with
+five years of history where the source has it; from then on the archive only grows — "100%
+coverage" means every configured canonical index has a valid authoritative series, not that a
+newly launched index is backfilled before its inception date.
 
 Index and ETF ingestion fail independently. To refresh index history alone, reusing the ETF
 artifacts already in `data/processed/` rather than overwriting them with a degraded fetch:

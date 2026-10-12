@@ -108,11 +108,14 @@ decision — on this dashboard, in the alerts and at every rebalance of the back
 are versioned in `src/config/strategy.json` (v{version}, config `{hash}`):
 
 1. **Eligible** — a full 12-month history and, because `require_investable` is on, a mapped ETF or
-   index fund with a price on the decision date. Eligible exposures are ranked by score.
+   index fund that had incepted by the decision date, by its recorded inception date (its first
+   published NAV in AMFI's record) — never by whether its price happened to download that night.
+   Eligible exposures are ranked by score.
 2. **Retention buffer** — a current holding is kept while its rank is ≤ **{m}**.
 3. **Entry** — an empty slot is filled only from ranks ≤ **{n}**, best first, never deeper.
-4. **Cash hurdle** — an exposure is held only while its own 12-month return beats the 12-month
-   cash return (**{rf}**). A top-ranked name that fails leaves its slot in cash rather than handing
+4. **Cash hurdle** — an exposure is held only while its own 12-month return beats what the
+   liquid fund ({cash_name}) returned over the same 12 months — **{rf}** only before the fund's NAV
+   history. A top-ranked name that fails leaves its slot in cash rather than handing
    it to a weaker name: relative momentum picks, absolute momentum decides whether to be invested.
 5. **Weights** — each slot is 1/{n} of the book; unfilled slots are cash.
 
@@ -135,6 +138,7 @@ every completed month in the data, the same chain the backtest replays.
         m=config.retention_buffer_m,
         n=config.target_holdings_n,
         rf=f"{config.risk_free_rate_annual:.1%}",
+        cash_name=config.cash_proxy.name if config.cash_proxy else "none configured",
         latest=(
             f"\nThe latest decision, at the **{live.target.as_of:%d %b %Y}** close, holds "
             + (", ".join(f"**{decisions.set_index('exposure_id')['exposure'].get(e, e)}**" for e in live.target.holdings) or "**cash only**")
@@ -197,7 +201,13 @@ session's close. The old portfolio earns the session in between, and each period
 fill to the next.
 
 **Costs are charged.** {bps:g} bps per side on every unit of weight bought or sold, deducted at
-the fill. Cash earns {rf}, the same rate as the hurdle and the Sharpe ratio.
+the fill. Cash earns what the liquid fund's NAV earned between the two fills — the same series as
+the hurdle — and {rf} only for periods before the fund's NAV history.
+
+**Back-calculated history.** NSE computes an index's values back to its base date when it launches
+it, so years of every new index's history were never tradable. Each index's launch date is recorded
+in `universe.json` from its NSE Indices factsheet, and the Backtest page can exclude everything
+before it.
 
 Two universes:
 
@@ -206,7 +216,7 @@ Two universes:
 | **Strategy (buyable)** | The portfolio. A pick must have had a real fund with a price **on that date**. |
 | **All indices** | The signal. The same rules over every index, whether or not a fund existed. |
 
-Investability is judged from each vehicle's own price history, never from today's lineup — most
+Investability is judged from each vehicle's recorded inception date, never from today's lineup — most
 of these funds launched in 2024–25, so treating them as available in 2021 would be look-ahead of
 the worst kind.
 

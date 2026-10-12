@@ -28,15 +28,17 @@ sys.path.insert(0, str(ROOT))
 from src.formatting import format_updated  # noqa: E402
 from src.portfolio.live import (  # noqa: E402
     LivePortfolio,
+    cash_series,
     live_portfolio_from_artifacts,
 )
 from src.quantitative.alerts import diff_targets, render_markdown  # noqa: E402
+from src.universe.registry import UniverseRegistry  # noqa: E402
 
 PROCESSED = "data/processed"
 INDEX_PRICES = f"{PROCESSED}/index_prices.parquet"
-ETF_UNIVERSE = f"{PROCESSED}/etf_universe.parquet"
-ETF_PRICES = f"{PROCESSED}/etf_prices.parquet"
 SUMMARY = f"{PROCESSED}/summary_rankings.parquet"
+CASH_NAV = f"{PROCESSED}/cash_nav.parquet"
+UNIVERSE = "data/universe/universe.json"
 
 
 def _committed(path: str, ref: str = "HEAD") -> pd.DataFrame:
@@ -54,17 +56,42 @@ def _working(path: str) -> pd.DataFrame:
     return pd.read_parquet(target) if target.exists() else pd.DataFrame()
 
 
+def _registry(text: str | None) -> UniverseRegistry | None:
+    if not text:
+        return None
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        handle.write(text)
+    try:
+        return UniverseRegistry.from_json(handle.name)
+    finally:
+        Path(handle.name).unlink(missing_ok=True)
+
+
+def _committed_text(path: str, ref: str = "HEAD") -> str | None:
+    try:
+        return subprocess.run(
+            ["git", "show", f"{ref}:{path}"], cwd=ROOT, capture_output=True, check=True
+        ).stdout.decode("utf-8")
+    except subprocess.CalledProcessError:
+        return None
+
+
 def _names(summary: pd.DataFrame) -> dict[str, str]:
     if summary.empty or "exposure_id" not in summary:
         return {}
     return {str(k): str(v) for k, v in zip(summary["exposure_id"], summary["exposure"])}
 
 
-def portfolio_from(load, names: dict[str, str]) -> LivePortfolio | None:
+def portfolio_from(load, names: dict[str, str], registry=None) -> LivePortfolio | None:
+    """The target the given dataset implies, with that dataset's own universe and cash series."""
     panel = load(INDEX_PRICES)
     if panel.empty:
         return None
-    return live_portfolio_from_artifacts(panel, load(ETF_UNIVERSE), load(ETF_PRICES), names=names)
+    if registry is None:
+        registry = UniverseRegistry.from_json(ROOT / UNIVERSE)
+    return live_portfolio_from_artifacts(panel, registry, cash_series(load(CASH_NAV)), names=names)
 
 
 def main() -> None:
@@ -80,7 +107,11 @@ def main() -> None:
         if args.out:
             args.out.write_text("", encoding="utf-8")
         return
-    previous = portfolio_from(lambda path: _committed(path, args.ref), names)
+    # The previous target is rebuilt exactly as it was published: committed
+    # prices, committed cash series, committed universe dates.
+    previous = portfolio_from(
+        lambda path: _committed(path, args.ref), names, _registry(_committed_text(UNIVERSE, args.ref))
+    )
 
     updated = ""
     metadata = ROOT / PROCESSED / "metadata.json"

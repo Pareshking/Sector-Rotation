@@ -18,17 +18,16 @@ from __future__ import annotations
 
 import logging
 import math
-import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
-from typing import Callable, Mapping
+from datetime import date
+from typing import Callable
 
 import pandas as pd
 import requests
 
 import src.data._jugaad_patches  # noqa: F401 — timeout + wider date-chunking, side effects only
+from src.data.calendar import TradingCalendar
 import jugaad_data.util as _jugaad_util
 from jugaad_data.nse.history import NSEIndexHistory
 
@@ -192,7 +191,8 @@ def completeness_problems(
     series: pd.Series,
     start: date,
     end: date,
-    calendar: pd.DatetimeIndex | None = None,
+    calendar: pd.DatetimeIndex | TradingCalendar | None = None,
+    min_observations: int = MIN_OBSERVATIONS,
 ) -> list[str]:
     """Why ``series`` is not a complete download of ``start``..``end``; empty when it is.
 
@@ -204,12 +204,14 @@ def completeness_problems(
     penalised for the years before its first value.
     """
     values = series.dropna()
-    if len(values) < MIN_OBSERVATIONS:
-        return [f"only {len(values)} observations (need {MIN_OBSERVATIONS})"]
+    if len(values) < min_observations:
+        return [f"only {len(values)} observations (need {min_observations})"]
     problems: list[str] = []
     gaps = values.index.to_series().diff().dt.days
     for when, days in gaps[gaps > MAX_SESSION_GAP_DAYS].items():
         problems.append(f"{int(days)}-day hole ending {when.date()}")
+    if isinstance(calendar, TradingCalendar):
+        calendar = calendar.sessions
     if calendar is None or len(calendar) == 0:
         return problems
 
@@ -237,7 +239,8 @@ def _fetch_validated(
     fetch: Callable[[], object],
     start: date,
     end: date,
-    calendar: pd.DatetimeIndex | None,
+    calendar: pd.DatetimeIndex | TradingCalendar | None,
+    min_observations: int = MIN_OBSERVATIONS,
 ) -> tuple[pd.Series | None, str]:
     """Fetch, parse and validate one endpoint, retrying transient failures.
 
@@ -249,7 +252,7 @@ def _fetch_validated(
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
             series = _records_to_series(label, fetch())
-            problems = completeness_problems(series, start, end, calendar)
+            problems = completeness_problems(series, start, end, calendar, min_observations)
             if problems:
                 raise IncompleteSeries("; ".join(problems[:3]))
             return series, ""
@@ -273,21 +276,31 @@ def fetch_jugaad_index(
     name: str,
     start: date,
     end: date,
-    calendar: pd.DatetimeIndex | None = None,
+    calendar: pd.DatetimeIndex | TradingCalendar | None = None,
+    value_types: tuple[str, ...] = (VALUE_TRI, VALUE_CLOSE),
+    min_observations: int = MIN_OBSERVATIONS,
 ) -> pd.Series:
     """Fetch one NSE index history. Total-return series preferred, price close accepted.
 
     ``series.attrs['value_type']`` records which of the two was actually served.
     When neither endpoint yields a complete series the result is empty and
     ``attrs['errors']`` says why, per endpoint.
+
+    An incremental fetch passes the stored series' type alone in
+    ``value_types``: falling back to the price index mid-history would splice
+    two different series. It also lowers ``min_observations``, since a window
+    of a few sessions is complete with a few values.
     """
     errors: list[str] = []
-    endpoints = (
-        (VALUE_TRI, lambda: index_tri_raw(name, name, start, end)),
-        (VALUE_CLOSE, lambda: index_raw(name, start, end)),
-    )
+    available = {
+        VALUE_TRI: lambda: index_tri_raw(name, name, start, end),
+        VALUE_CLOSE: lambda: index_raw(name, start, end),
+    }
+    endpoints = [(kind, available[kind]) for kind in value_types if kind in available]
     for value_type, fetch in endpoints:
-        series, reason = _fetch_validated(f"{name} [{value_type}]", fetch, start, end, calendar)
+        series, reason = _fetch_validated(
+            f"{name} [{value_type}]", fetch, start, end, calendar, min_observations
+        )
         if series is not None:
             series = series.rename(name)
             series.attrs.update(source=SOURCE, resolved_name=name, value_type=value_type)
@@ -296,83 +309,3 @@ def fetch_jugaad_index(
     empty = pd.Series(dtype="float64", name=name)
     empty.attrs["errors"] = errors
     return empty
-
-
-def fetch_jugaad_canonical_indices(
-    exposure_names: Mapping[str, str],
-    years: int = 5,
-    workers: int = 4,
-    calendar: pd.DatetimeIndex | None = None,
-) -> tuple[pd.DataFrame, dict[str, str], dict[str, str], dict[str, str]]:
-    """Return (prices, source_by_exposure, resolved_name_by_exposure, value_type_by_exposure).
-
-    ``prices.attrs['fetch_errors']`` maps every exposure that did not resolve to
-    the reason, so a missing series is explained rather than just absent.
-    """
-    start = date.today() - timedelta(days=365 * years + 10)
-    results: dict[str, pd.Series] = {}
-    sources: dict[str, str] = {}
-    resolved: dict[str, str] = {}
-    value_types: dict[str, str] = {}
-    errors: dict[str, str] = {}
-    t0 = time.time()
-    total = len(exposure_names)
-    print(f"[{time.strftime('%H:%M:%S')}] Canonical indices: fetching {total}...", file=sys.stderr, flush=True)
-
-    def one(item):
-        eid, name = item
-        return eid, name, fetch_jugaad_index(name, start, date.today(), calendar=calendar)
-
-    done = 0
-    with ThreadPoolExecutor(max_workers=min(workers, max(len(exposure_names), 1))) as pool:
-        futures = {pool.submit(one, item): item for item in exposure_names.items()}
-        for future in as_completed(futures):
-            done += 1
-            eid, name = futures[future]
-            try:
-                _, _, series = future.result()
-            except Exception as exc:
-                logger.exception("Canonical index %s (%s) failed", eid, name)
-                errors[eid] = f"{type(exc).__name__}: {exc}"
-                continue
-            if len(series) >= MIN_OBSERVATIONS:
-                results[eid] = series.rename(eid)
-                sources[eid] = series.attrs.get("source", SOURCE)
-                resolved[eid] = series.attrs.get("resolved_name", name)
-                value_types[eid] = series.attrs.get("value_type", VALUE_CLOSE)
-            else:
-                errors[eid] = "; ".join(series.attrs.get("errors", [])) or "no usable history"
-            if done % 10 == 0 or done == total:
-                print(
-                    f"[{time.strftime('%H:%M:%S')}] Canonical indices: {done}/{total} attempted, "
-                    f"{len(results)} resolved, {time.time() - t0:.0f}s elapsed",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
-    prices = pd.DataFrame(results).sort_index() if results else pd.DataFrame()
-    prices.attrs["fetch_errors"] = errors
-    return prices, sources, resolved, value_types
-
-
-def fetch_benchmark(name: str = "NIFTY 50", years: int = 5) -> pd.Series:
-    """Benchmark history from the same adapter as every exposure.
-
-    Using one source for both sides keeps relative returns internally consistent;
-    mixing a Yahoo benchmark with NSE exposure histories introduces a calendar
-    and dividend-treatment mismatch into every relative number.
-
-    The benchmark *is* the session calendar every exposure is checked against,
-    so it is validated on its own terms: no hole longer than any NSE closure,
-    and it must start at the beginning of the requested window.
-    """
-    start = date.today() - timedelta(days=365 * years + 10)
-    series = fetch_jugaad_index(name, start, date.today())
-    if not series.empty:
-        lead = (series.index[0] - pd.Timestamp(start)).days
-        if lead > MAX_SESSION_GAP_DAYS:
-            logger.error("%s starts %d days after the requested start", name, lead)
-            empty = pd.Series(dtype="float64", name=name)
-            empty.attrs["errors"] = [f"first observation {series.index[0].date()} is {lead} days late"]
-            return empty
-    return series

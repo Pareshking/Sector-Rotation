@@ -64,7 +64,7 @@ basis = row3[0].segmented_control(
 only_grade = row2[2].toggle("Decision-grade only", value=True, key="screener_grade")
 only_tradeable = row3[2].toggle(
     "Buyable only", value=False, key="screener_tradeable",
-    help="Keep only exposures with a mapped ETF or index fund that had a price on the decision date.",
+    help="Keep only exposures with a mapped ETF or index fund that had incepted by the decision date.",
 )
 
 frame = decisions[decisions.category.isin(picked_categories)]
@@ -96,7 +96,7 @@ kpi_strip(
         (
             "Buyable",
             int(frame.tradeable.sum()) if "tradeable" in frame else "—",
-            "a fund had a price on the decision date",
+            "a fund had incepted by the decision date",
             "",
         ),
         (
