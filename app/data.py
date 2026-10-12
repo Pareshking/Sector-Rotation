@@ -422,3 +422,38 @@ def _model_book(modified_ns: int = 0):
 def load_model_book():
     return _model_book(_stamp("index_prices.parquet", "etf_prices.parquet", "etf_universe.parquet",
                               "cash_nav.parquet", "summary_rankings.parquet"))
+
+
+def market_state():
+    """The figures in the header's market strip (app/kit/header.py)."""
+    from app.components.header import header_state
+    from app.kit.header import Market
+
+    _, benchmark = load_index_panel()
+    regime = current_regime()
+    decisions = load_decisions()
+    level = vs_200d = None
+    if not benchmark.dropna().empty:
+        series = benchmark.dropna()
+        level = float(series.iloc[-1])
+        if len(series) >= 200:
+            vs_200d = float(series.iloc[-1] / series.tail(200).mean() - 1.0)
+    hurdle = regime.cash_12m if regime is not None else None
+    beating = 0
+    if hurdle is not None and not decisions.empty:
+        beating = int((pd.to_numeric(decisions["return_12M"], errors="coerce") > hurdle).sum())
+    tradeable = int(decisions["tradeable"].astype(bool).sum()) if "tradeable" in decisions else 0
+    state = header_state()
+    stamp = pd.Timestamp(benchmark.dropna().index[-1]) if not benchmark.dropna().empty else None
+    return Market(
+        regime=regime.label if regime is not None else "",
+        benchmark_level=level,
+        vs_200d=vs_200d,
+        benchmark_12m=regime.benchmark_12m if regime is not None else None,
+        hurdle_12m=hurdle,
+        universe=len(decisions),
+        beating_cash=beating,
+        tradeable=tradeable,
+        prices_as_of=f"{stamp:%d %b}" if stamp is not None else "",
+        stale=not state.fresh,
+    )

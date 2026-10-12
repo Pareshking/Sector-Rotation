@@ -19,6 +19,12 @@ def _text(value: str) -> str:
     return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", value.replace("<br>", " | ")))).strip()
 
 
+def _page_text(at) -> str:
+    """Text of every markdown and st.html element, tags stripped."""
+    parts = [m.value for m in at.markdown] + [str(getattr(h, "proto", h).body) for h in at.get("html")]
+    return " ".join(_text(p) for p in parts)
+
+
 def _render(page_file: str):
     from streamlit.testing.v1 import AppTest
 
@@ -29,12 +35,14 @@ def _render(page_file: str):
 # Structure and routes
 # --------------------------------------------------------------------------- #
 def test_the_app_has_exactly_six_pages_in_order():
-    assert [p.title for p in PAGES] == ["Portfolio", "Rankings", "Evidence", "Exposure", "Data Health", "Method"]
+    """The Screener is home, as in the Paresh app."""
+    assert [p.title for p in PAGES] == ["Screener", "Portfolio", "Exposure", "Evidence", "Data Health", "Method"]
     assert [p.file for p in PAGES] == [
-        "1_Portfolio.py", "2_Rankings.py", "3_Evidence.py", "4_Exposure.py", "5_Data_Health.py", "6_Method.py"
+        "2_Rankings.py", "1_Portfolio.py", "4_Exposure.py", "3_Evidence.py", "5_Data_Health.py", "6_Method.py"
     ]
     assert sum(p.default for p in PAGES) == 1 and PAGES[0].default
     assert len({p.url_path for p in PAGES}) == len(PAGES)
+    assert all(p.icon is None for p in PAGES), "the header links are text, as in the Paresh app"
 
 
 def test_the_views_folder_holds_only_the_six_pages():
@@ -49,28 +57,27 @@ def test_the_app_shell_builds_navigation_from_the_single_definition():
 
 
 def test_every_link_resolves_and_the_default_page_is_at_the_root():
-    """A default page's url_path is not routed: '/Portfolio' would answer 'Page not found'."""
-    assert HOME_PATH == "Portfolio"
-    assert nav_href("Portfolio") == "/"
+    """A default page's url_path is not routed: '/Screener' would answer 'Page not found'."""
+    assert HOME_PATH == "Screener"
+    assert nav_href("Screener") == "/"
     assert [nav_href(p.url_path) for p in PAGES[1:]] == [
-        "/Rankings", "/Evidence", "/Exposure", "/Data_Health", "/Method"
+        "/Portfolio", "/Exposure", "/Evidence", "/Data_Health", "/Method"
     ]
-    assert all(nav_href(p.url_path) != "/Portfolio" for p in PAGES)
 
 
-def test_the_logo_links_to_the_site_root():
-    source = (ROOT / "app" / "streamlit_app.py").read_text(encoding="utf-8")
-    assert 'link="https://dualmomentum.streamlit.app/"' in source
+def test_the_brand_links_home_through_the_header():
+    source = (ROOT / "app" / "kit" / "header.py").read_text(encoding="utf-8")
+    assert 'st.page_link(nav_pages[0], label="Dual Momentum")' in source
 
 
-def test_the_shell_renders_the_header_and_phone_nav_once_for_every_page():
-    """The shell marks the running page active; a page calling either itself would render it twice."""
+def test_the_shell_renders_the_paresh_header_once_for_every_page():
+    """The shell draws the header and stylesheet; a page drawing either itself would draw it twice."""
     shell = (ROOT / "app" / "streamlit_app.py").read_text(encoding="utf-8")
-    assert "global_header()" in shell
-    assert "mobile_nav(next((page.url_path for page in PAGES if page.title == current.title)" in shell
+    assert 'st.navigation(pages, position="hidden")' in shell
+    assert "inject_custom_css()" in shell and "render_header(market_state(), pages, current, GROUPS)" in shell
     for page in PAGES:
         source = (VIEWS / page.file).read_text(encoding="utf-8")
-        assert "mobile_nav(" not in source and "global_header(" not in source, page.file
+        assert "render_header(" not in source and "inject_custom_css(" not in source, page.file
 
 
 def test_the_phone_nav_marks_only_the_active_page(monkeypatch):
@@ -132,10 +139,10 @@ def test_the_shell_renders_the_status_header_above_the_default_page():
 
     at = AppTest.from_file(str(ROOT / "app" / "streamlit_app.py"), default_timeout=300).run()
     assert not at.exception, [e.message for e in at.exception]
-    text = " ".join(_text(m.value) for m in at.markdown)
-    assert len(re.findall(r"Dual Momentum RISK-(?:ON|OFF) ", text)) == 1, "one regime chip in the header"
-    assert "As of" in text and re.search(r"Data (fresh|stale)", text)
-    assert "Portfolio value" in text, "the default page runs beneath the header"
+    text = _page_text(at)
+    assert len(re.findall(r"Risk-(?:on|off)", text)) == 1, "one regime in the market strip"
+    assert re.search(r"(Prices · close of|Data stale · closes of) \d{2} \w{3}", text)
+    assert "Universe" in text and "200D average" in text
 
 
 @needs_data
@@ -143,12 +150,11 @@ def test_the_portfolio_page_is_the_model_book_dashboard():
     """Six readings, then the Paresh layout: book, mix, co-movement, equity, calendar, record, trades, rebalances."""
     at = _render("1_Portfolio.py")
     assert not at.exception, [e.message for e in at.exception]
-    text = " ".join(_text(m.value) for m in at.markdown)
+    text = _page_text(at)
     for reading in ("Portfolio value", "Since inception", "Unrealised P&L", "Day P&L", "Cash / realised balance"):
         assert reading in text, reading
-    assert "Invested: ₹20,00,000" in text
-    for card in ("Current book", "Exposure mix", "Equity & drawdown", "Calendar returns", "Monthly record",
-                 "Trades", "Rebalances"):
+    assert "Invested: ₹2,000,000" in text
+    for card in ("Current book", "Sector exposure", "Equity & drawdown", "Calendar returns", "Trades", "Rebalances"):
         assert card in text, card
     assert [p.options for p in at.get("button_group")][:2] == [["All", "Winners", "Losers", "Open"],
                                                                 ["All", "Buy", "Sell", "Hold"]]
