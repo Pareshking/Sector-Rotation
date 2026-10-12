@@ -126,3 +126,18 @@ def test_every_shipped_etf_has_an_nse_symbol():
     exposures = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json").all()
     unmatched = [f"{x.id}/{v.name}" for x in exposures for v in x.etfs if v.vehicle == "etf" and not v.symbol]
     assert not unmatched
+
+
+def test_proxy_vehicles_name_the_index_they_actually_track():
+    """GROWWPOWER tracks BSE Power, not NIFTY POWER; the entry must say so."""
+    root = Path(__file__).resolve().parents[1]
+    exposures = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json").all()
+    tracked = {v.symbol: v.tracked_index for x in exposures for v in x.etfs if v.tracked_index}
+    assert tracked == {"GROWWPOWER": "BSE Power", "ICICIB22": "BSE Bharat 22"}
+
+
+def test_tracked_index_equal_to_the_benchmark_is_rejected():
+    """tracked_index marks a proxy, so repeating the benchmark is a mislabel."""
+    etf = ETFMapping(symbol="X", name="X Power ETF", tracked_index="nifty power")
+    exposure = Exposure(id="power", name="Power", category=ExposureCategory.SECTOR, benchmark="NIFTY POWER", etfs=[etf])
+    assert any("tracked_index repeats the benchmark" in e for e in validate_universe([exposure]).errors)

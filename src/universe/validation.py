@@ -49,6 +49,10 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
                 if symbol in etf.aliases:
                     errors.append(f"{exposure.id}/{symbol}: primary symbol duplicated in aliases")
             all_aliases.extend(etf.aliases)
+            # tracked_index marks a proxy; naming the benchmark itself would
+            # label an exact tracker as a stand-in.
+            if etf.tracked_index and etf.tracked_index.strip().upper() == exposure.benchmark.strip().upper():
+                errors.append(f"{exposure.id}/{symbol or etf.name}: tracked_index repeats the benchmark; omit it")
             if etf.yfinance_symbol and not YF_NSE_RE.fullmatch(etf.yfinance_symbol):
                 errors.append(f"{exposure.id}/{symbol or etf.scheme_code}: invalid Yahoo NSE alias {etf.yfinance_symbol}")
             # Yahoo is the last-resort source, and an open-ended index fund is

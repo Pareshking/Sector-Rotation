@@ -38,6 +38,10 @@ class ETFMapping(BaseModel):
     symbol: Optional[str] = Field(default=None, min_length=1)
     vehicle: VehicleType = VehicleType.ETF
     name: str = Field(min_length=1)
+    # Set only when the vehicle tracks a different index from its exposure's
+    # benchmark, i.e. it is a labelled proxy (Bharat 22 under PSE, BSE Power
+    # under NIFTY POWER). Unset means it tracks the benchmark itself.
+    tracked_index: Optional[str] = Field(default=None, min_length=1)
     scheme_code: Optional[int] = Field(default=None, gt=0)
     # The scheme's ISIN: NSE's ETF list for a listed ETF, AMFI's NAV file for an
     # index fund. It ties the symbol to the scheme code, so a code that points
