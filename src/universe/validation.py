@@ -61,6 +61,15 @@ def validate_universe(exposures: list[Exposure] | tuple[Exposure, ...]) -> Valid
                 )
             if etf.scheme_code is None:
                 warnings.append(f"{exposure.id}/{symbol or etf.name}: MFAPI scheme code will be resolved by search")
+    for exposure in exposures:
+        if exposure.launch_date and exposure.base_date and exposure.launch_date < exposure.base_date:
+            errors.append(f"{exposure.id}: launch_date {exposure.launch_date} precedes base_date {exposure.base_date}")
+        if exposure.launch_date is None or exposure.base_date is None:
+            warnings.append(f"{exposure.id}: no authoritative launch/base date; back-calculated history cannot be flagged")
+        for etf in exposure.etfs:
+            if etf.inception_date is None:
+                # Fail safe: an undated vehicle is never treated as buyable.
+                warnings.append(f"{exposure.id}/{etf.symbol or etf.name}: no inception_date; not treated as buyable")
     for symbol, count in Counter(etf_symbols).items():
         if count > 1:
             errors.append(f"Duplicate ETF symbol: {symbol}")

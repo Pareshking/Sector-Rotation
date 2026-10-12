@@ -124,22 +124,26 @@ def published():
     benchmark = panel.pop("__benchmark__")
     etfs = pd.read_parquet(PROCESSED / "etf_universe.parquet")
     etf_prices = pd.read_parquet(PROCESSED / "etf_prices.parquet")
-    meta = build_universe_metadata(panel.columns, etfs, etf_prices)
+    from src.portfolio.live import cash_series, load_registry
+
+    meta = build_universe_metadata(panel.columns, load_registry())
+    cash_path = PROCESSED / "cash_nav.parquet"
+    cash = cash_series(pd.read_parquet(cash_path)) if cash_path.exists() else None
     config = load_strategy_config()
-    result = run_backtest(panel, benchmark, config, meta)
-    return panel, etfs, etf_prices, meta, config, result
+    result = run_backtest(panel, benchmark, config, meta, cash_nav=cash)
+    return panel, etfs, etf_prices, meta, config, result, cash
 
 
 @needs_data
 def test_on_the_published_data_the_backtest_and_live_target_agree(published):
-    panel, etfs, etf_prices, meta, config, result = published
-    live = live_portfolio_from_artifacts(
-        panel.assign(__benchmark__=1.0), etfs, etf_prices, config=config
-    )
+    panel, etfs, etf_prices, meta, config, result, cash = published
+    live = live_portfolio_from_artifacts(panel.assign(__benchmark__=1.0), cash_nav=cash, config=config)
     assert result.ok
     assert result.final_target.to_json() == live.target.to_json()
     as_of = live.target.as_of
-    direct = construct_target_portfolio(as_of, panel.loc[:as_of], meta, result.decisions[-2].weights, config)
+    direct = construct_target_portfolio(
+        as_of, panel.loc[:as_of], meta, result.decisions[-2].weights, config, cash
+    )
     assert direct.to_json() == live.target.to_json()
 
 
@@ -147,7 +151,7 @@ def test_on_the_published_data_the_backtest_and_live_target_agree(published):
 def test_the_alert_tool_builds_the_same_target(published):
     import tools.detect_alerts as alerts_tool
 
-    _, _, _, _, _, result = published
+    result = published[5]
     current = alerts_tool.portfolio_from(alerts_tool._working, {})
     assert current.target.to_json() == result.final_target.to_json()
 
@@ -157,7 +161,7 @@ def test_the_dashboard_holds_exactly_the_backtest_final_holdings(published):
     import app.data as app_data
     from app.components.metrics import HELD_ACTIONS
 
-    _, _, _, _, _, result = published
+    result = published[5]
     live = app_data.load_portfolio()
     assert live.target.holdings == result.final_target.holdings
     assert dict(live.target.weights) == dict(result.final_target.weights)

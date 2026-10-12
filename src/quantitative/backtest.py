@@ -13,8 +13,9 @@ the accounting:
 * **Costs.** ``cost_bps_per_side`` is charged on every unit of weight bought
   or sold (cash legs are free): ``cost = bps x sum_i |w_i - w_prior_i|``,
   deducted at the fill.
-* **Cash** earns the risk-free rate — the same rate as the cash hurdle and the
-  Sharpe ratio.
+* **Cash** earns what the configured liquid fund's NAV returned between the two
+  fills — the same series as the cash hurdle. The constant rate is used only
+  for periods that start before the fund's NAV history.
 * **Only completed months are periods.** The current, unfinished month is not
   a rebalance date unless ``include_partial`` asks for it, and annualisation
   uses the trading sessions actually covered.
@@ -32,6 +33,7 @@ import pandas as pd
 
 from src.config import StrategyConfig, load_strategy_config
 from src.portfolio.calendar import fill_date, month_is_complete, rebalance_dates
+from src.portfolio.cash import period_return
 from src.portfolio.construct import CASH, TargetPortfolio, decision_chain
 from src.portfolio.score import FFILL_LIMIT
 from src.portfolio.universe import ExposureMeta
@@ -106,6 +108,7 @@ def run_backtest(
     universe_metadata: Mapping[str, ExposureMeta] | None = None,
     months: int | None = None,
     include_partial: bool = False,
+    cash_nav: pd.Series | None = None,
 ) -> BacktestResult:
     """Replay the strategy over the panel and account for what it would have earned.
 
@@ -138,7 +141,7 @@ def run_backtest(
             )
         )
 
-    chain = decision_chain(prices, universe_metadata, config, dates)
+    chain = decision_chain(prices, universe_metadata, config, dates, cash_nav=cash_nav)
     marks = prices.ffill(limit=FFILL_LIMIT)
     index = prices.index
     last_session = pd.Timestamp(index[-1])
@@ -169,7 +172,7 @@ def run_backtest(
             continue
 
         period_years = (end - start).days / 365.25 if partial else hold_months / 12.0
-        cash_return = (1.0 + rate) ** period_years - 1.0
+        cash_return, cash_source = period_return(cash_nav, start, end, rate, period_years)
         realised: dict[str, float] = {}
         missing: list[str] = []
         for exposure_id in target.holdings:
@@ -198,6 +201,7 @@ def run_backtest(
                 "cash_weight": cash_weight,
                 "cash_slots": int(round(cash_weight * config.target_holdings_n)),
                 "cash_return": cash_return,
+                "cash_source": cash_source,
                 "gross_return": gross,
                 "cost": cost,
                 "strategy_return": net,
@@ -349,6 +353,7 @@ def weight_sensitivity(
     schemes: Mapping[str, StrategyConfig],
     universe_metadata: Mapping[str, ExposureMeta] | None = None,
     months: int | None = None,
+    cash_nav: pd.Series | None = None,
 ) -> pd.DataFrame:
     """Run the same test under several score specifications.
 
@@ -358,7 +363,7 @@ def weight_sensitivity(
     """
     rows = []
     for label, config in schemes.items():
-        result = run_backtest(prices, benchmark, config, universe_metadata, months=months)
+        result = run_backtest(prices, benchmark, config, universe_metadata, months=months, cash_nav=cash_nav)
         if not result.ok:
             continue
         rows.append(

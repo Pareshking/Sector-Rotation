@@ -216,6 +216,36 @@ def _exposure_value_type_regression(report: QualityReport, new: dict, previous: 
         )
 
 
+def _restatements(report: QualityReport, new: dict) -> None:
+    """Values NSE or AMFI changed after first publishing them.
+
+    The store keeps both versions; this makes sure someone sees it. A warning,
+    not an error: restatements are legitimate (index corrections, corporate
+    actions), but an unexplained one deserves a look before acting on a signal.
+    """
+    items = new.get("restatements") or []
+    by_series: dict[str, list[dict]] = {}
+    for item in items:
+        by_series.setdefault(f"{item.get('kind')}/{item.get('series_id')}", []).append(item)
+    for series, rows in sorted(by_series.items()):
+        worst = max(rows, key=lambda r: abs(float(r.get("rel_change") or 0)))
+        report.add(
+            "warning",
+            "restatement",
+            f"{series}: {len(rows)} stored value(s) restated, largest "
+            f"{float(worst.get('rel_change') or 0):+.4%} on {worst.get('date')}.",
+        )
+
+
+def _inception_conflicts(report: QualityReport, new: dict) -> None:
+    for line in new.get("inception_conflicts") or []:
+        report.add(
+            "warning",
+            "inception_conflict",
+            f"{line}. The recorded inception date decides buyability; correct it in universe.json.",
+        )
+
+
 def _publication_age(report: QualityReport, new: dict) -> None:
     """Catch a silent publishing failure by its symptom, not its cause."""
     stamp = new.get("last_updated_utc")
@@ -256,6 +286,8 @@ def check_dataset(
         report.add("info", "baseline", "No previous metadata found; skipped regression checks.")
 
     _benchmark_value_type(report, new_metadata, previous)
+    _restatements(report, new_metadata)
+    _inception_conflicts(report, new_metadata)
     _publication_age(report, new_metadata)
     _staleness(report, index_prices)
     _flatlines(report, index_prices, "canonical index histories", "error")

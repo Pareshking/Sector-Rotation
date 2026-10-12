@@ -17,8 +17,15 @@ from app.components.metrics import (
     lineage_frame,
     source_label,
 )
-from app.components.theme import mobile_nav, inject_theme, kpi_strip, note, page_header, section
-from app.data import load_decisions, load_index_panel
+from app.components.theme import (
+    inject_theme,
+    kpi_strip,
+    mobile_nav,
+    note,
+    page_header,
+    section,
+)
+from app.data import load_cash_nav, load_decisions, load_index_panel, universe_metadata
 
 inject_theme()
 mobile_nav("System_Health")
@@ -87,6 +94,64 @@ else:
     st.success(
         f"Index panel available: {panel.shape[1]} exposures plus the Nifty 50 benchmark, "
         f"{len(panel)} trading days from {panel.index.min():%d %b %Y} to {panel.index.max():%d %b %Y}."
+    )
+
+    meta = universe_metadata()
+    rows = []
+    for eid in panel.columns:
+        item = meta.get(str(eid))
+        if item is None or item.launch_date is None or item.launch_date <= panel.index.min():
+            continue
+        observed = panel[eid].dropna().index
+        rows.append(
+            {
+                "Exposure": item.name,
+                "NSE launch": item.launch_date,
+                "Base date": item.base_date,
+                "Back-calculated": float((observed < item.launch_date).mean()) if len(observed) else None,
+            }
+        )
+    section(
+        "Back-calculated history",
+        "Indices NSE launched inside the panel; their earlier values were computed after the fact",
+    )
+    if rows:
+        frame = pd.DataFrame(rows).sort_values("Back-calculated", ascending=False)
+        st.dataframe(
+            frame,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "NSE launch": st.column_config.DateColumn(format="DD MMM YYYY"),
+                "Base date": st.column_config.DateColumn(format="DD MMM YYYY"),
+                "Back-calculated": st.column_config.ProgressColumn(
+                    format="percent", min_value=0.0, max_value=1.0,
+                    help="Share of this index's stored history that predates its launch",
+                ),
+            },
+        )
+        note(
+            f"<b>{len(rows)} of {panel.shape[1]} indices launched inside the panel.</b> Launch and base "
+            "dates come from each index's NSE Indices factsheet, recorded in <code>universe.json</code>. "
+            "The Backtest page can exclude everything before each launch date.",
+            tone="amber",
+        )
+    else:
+        st.success("Every index in the panel launched before the panel starts.")
+
+section("Cash proxy", "The liquid fund whose NAV is the cash hurdle and the cash return")
+proxy = (get_metadata() or {}).get("cash_proxy") or {}
+cash = load_cash_nav()
+if cash is not None and not cash.empty:
+    st.success(
+        f"{proxy.get('name') or 'Configured liquid fund'} (AMFI scheme {proxy.get('scheme_code', '—')}): "
+        f"{len(cash)} daily NAVs from {cash.index.min():%d %b %Y} to {cash.index.max():%d %b %Y}."
+    )
+else:
+    note(
+        "The liquid fund's NAV (<code>cash_nav.parquet</code>) has not been published yet. Until it "
+        "is, the cash hurdle and cash accrual use the configured constant rate.",
+        tone="amber",
     )
 
 section("ETF coverage")

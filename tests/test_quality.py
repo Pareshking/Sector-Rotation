@@ -193,10 +193,10 @@ def test_a_value_type_regression_fails_the_strict_pipeline(monkeypatch, tmp_path
     real_fixture = rp.build_fixture
 
     def close_benchmark(registry):
-        prices, benchmark, etfs, etf_prices, health = real_fixture(registry, days=400)
+        prices, benchmark, etfs, etf_prices, cash, health = real_fixture(registry, days=400)
         health["benchmark_value_type"] = "CLOSE"
         health["value_type_by_canonical_exposure"] = {k: "CLOSE" for k in health["value_type_by_canonical_exposure"]}
-        return prices, benchmark, etfs, etf_prices, health
+        return prices, benchmark, etfs, etf_prices, cash, health
 
     monkeypatch.setattr(rp, "build_fixture", close_benchmark)
     import pytest

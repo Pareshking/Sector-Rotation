@@ -18,7 +18,8 @@ The rule (strategy v1.0, ``src/config/strategy.json``):
    cash rather than handing it to a weaker name (classic dual momentum:
    relative momentum picks, absolute momentum decides whether to be invested).
 5. Hurdle (``dual_momentum_cash_hurdle``): the exposure's own 12-month return
-   must exceed the 12-month cash return.
+   must exceed the 12-month cash return — what the configured liquid fund's NAV
+   actually returned over the same year, or the constant before its history.
 6. Each slot is 1/N of the book; unfilled slots are cash.
 """
 
@@ -33,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import StrategyConfig
+from src.portfolio.cash import trailing_12m
 from src.portfolio.score import rank_by_score, score_exposures
 from src.portfolio.universe import ExposureMeta
 
@@ -51,6 +53,7 @@ STATUS_WAITING = "inside buffer, entry needs rank <= N"
 STATUS_SLOTS_FULL = "slots full"
 STATUS_BELOW_ENTRY = "rank too low"
 STATUS_NO_VEHICLE = "no buyable vehicle on this date"
+STATUS_PRELAUNCH = "before index launch (back-calculated history)"
 STATUS_NO_HISTORY = "insufficient history"
 
 _EPS = 1e-12
@@ -77,6 +80,8 @@ class TargetPortfolio:
     config_hash: str = ""
     eligible_count: int = 0
     notes: tuple[str, ...] = ()
+    cash_hurdle_12m: float = float("nan")
+    cash_hurdle_source: str = ""
 
     @property
     def holdings(self) -> tuple[str, ...]:
@@ -111,6 +116,8 @@ class TargetPortfolio:
                 for d in self.decisions
             ],
             "notes": list(self.notes),
+            "cash_hurdle_12m": _json_float(self.cash_hurdle_12m),
+            "cash_hurdle_source": self.cash_hurdle_source,
             "ranking": [
                 {k: _json_value(v) for k, v in row.items()}
                 for row in ranking.to_dict("records")
@@ -137,8 +144,10 @@ def _json_float(value: object) -> float | None:
 
 
 def _json_value(value: object) -> object:
-    if value is None or value is pd.NA:
+    if value is None or value is pd.NA or value is pd.NaT:
         return None
+    if isinstance(value, np.datetime64):
+        value = pd.Timestamp(value)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)):
@@ -161,6 +170,7 @@ def construct_target_portfolio(
     universe_metadata: Mapping[str, ExposureMeta] | None,
     prior_weights: Mapping[str, float] | None,
     config: StrategyConfig,
+    cash_nav: pd.Series | None = None,
 ) -> TargetPortfolio:
     """Target weights, signals and reasons for a rebalance at the close of ``current_date``.
 
@@ -171,15 +181,22 @@ def construct_target_portfolio(
     as_of = pd.Timestamp(current_date)
     meta = dict(universe_metadata or {})
     n, m = int(config.target_holdings_n), int(config.retention_buffer_m)
-    hurdle = config.cash_hurdle_12m
+    # What cash actually returned over the same year, from the liquid fund's NAV;
+    # the constant only before the fund had a year of history.
+    hurdle, hurdle_source = trailing_12m(cash_nav, as_of, config.risk_free_rate_annual)
     use_hurdle = config.absolute_momentum_filter == "dual_momentum_cash_hurdle"
+    exclude_prelaunch = config.backfill_policy == "exclude_prelaunch"
 
     scores = score_exposures(price_history, as_of, config)
     table = scores.copy()
     table["name"] = [meta[e].name if e in meta else str(e) for e in table.index]
     table["category"] = [meta[e].category if e in meta else "" for e in table.index]
     table["investable"] = [bool(meta[e].investable_on(as_of)) if e in meta else False for e in table.index]
+    table["launch_date"] = [meta[e].launch_date if e in meta else None for e in table.index]
+    table["backcalculated"] = [bool(meta[e].backcalculated_on(as_of)) if e in meta else False for e in table.index]
     eligible = table["valid"] & (table["investable"] if config.require_investable else True)
+    if exclude_prelaunch:
+        eligible &= ~table["backcalculated"].astype(bool)
     table["eligible"] = eligible.astype(bool)
     table["rank"] = rank_by_score(table.loc[table["eligible"], "score"]).reindex(table.index)
     table["hurdle_pass"] = (
@@ -213,7 +230,10 @@ def construct_target_portfolio(
             sell_reason[e] = "No longer scorable: the price history needed for a 12-month score is missing."
             continue
         if config.require_investable and not bool(table.at[e, "investable"]):
-            sell_reason[e] = "No longer buyable: no vehicle has a price on this date."
+            sell_reason[e] = "Not buyable: no mapped vehicle had incepted by this date."
+            continue
+        if exclude_prelaunch and bool(table.at[e, "backcalculated"]):
+            sell_reason[e] = "The index had not launched by this date; its history here is back-calculated."
             continue
         r = rank.get(e)
         if pd.isna(r) or int(r) > m:
@@ -262,6 +282,8 @@ def construct_target_portfolio(
             table.at[e, "status"] = STATUS_NO_HISTORY
         elif config.require_investable and not bool(table.at[e, "investable"]):
             table.at[e, "status"] = STATUS_NO_VEHICLE
+        elif exclude_prelaunch and bool(table.at[e, "backcalculated"]):
+            table.at[e, "status"] = STATUS_PRELAUNCH
         elif e in blocked or (use_hurdle and not bool(table.at[e, "hurdle_pass"]) and int(rank[e]) <= n):
             table.at[e, "status"] = STATUS_HURDLE
         elif int(rank[e]) <= n:
@@ -315,7 +337,12 @@ def construct_target_portfolio(
             f"({describe(e)}); its slot stays in cash."
         )
     if cash > _EPS:
-        notes.append(f"{cash:.0%} of the book is in cash, earning {hurdle:.1%} a year.")
+        earning = (
+            f"the liquid fund returned {hurdle:.1%} over the last 12 months"
+            if hurdle_source == "nav"
+            else f"assumed {hurdle:.1%} a year (before the liquid fund's NAV history)"
+        )
+        notes.append(f"{cash:.0%} of the book is in cash; {earning}.")
 
     table["target_weight"] = [weights.get(e, 0.0) for e in table.index]
     table["prior_weight"] = [prior.get(e, 0.0) for e in table.index]
@@ -332,6 +359,8 @@ def construct_target_portfolio(
         config_hash=config.config_hash,
         eligible_count=eligible_count,
         notes=tuple(notes),
+        cash_hurdle_12m=float(hurdle),
+        cash_hurdle_source=hurdle_source,
     )
 
 
@@ -341,6 +370,7 @@ def decision_chain(
     config: StrategyConfig,
     signal_dates: Sequence[pd.Timestamp],
     initial_weights: Mapping[str, float] | None = None,
+    cash_nav: pd.Series | None = None,
 ) -> list[TargetPortfolio]:
     """Every rebalance decision in order, each one's target becoming the next one's prior.
 
@@ -351,7 +381,7 @@ def decision_chain(
     prior: Mapping[str, float] = dict(initial_weights or {CASH: 1.0})
     chain: list[TargetPortfolio] = []
     for when in signal_dates:
-        target = construct_target_portfolio(when, price_history, universe_metadata, prior, config)
+        target = construct_target_portfolio(when, price_history, universe_metadata, prior, config, cash_nav)
         chain.append(target)
         prior = target.weights
     return chain

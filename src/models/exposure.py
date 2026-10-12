@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Optional
 
@@ -42,6 +43,12 @@ class ETFMapping(BaseModel):
     exchange: str = "NSE"
     aliases: list[str] = Field(default_factory=list)
     tracking: TrackingMetrics = Field(default_factory=TrackingMetrics)
+    # The first date the vehicle existed to buy: its first published NAV in
+    # AMFI's record. Authoritative metadata maintained by
+    # tools/refresh_universe_dates.py and reviewed like code — never derived
+    # from whatever the nightly price fetch happened to return.
+    inception_date: Optional[date] = None
+    inception_source: Optional[str] = None
 
     @field_validator("symbol", "exchange")
     @classmethod
@@ -62,6 +69,11 @@ class Exposure(BaseModel):
     benchmark: str = Field(min_length=1)
     yfinance_symbol: Optional[str] = None
     etfs: list[ETFMapping] = Field(default_factory=list)
+    # From the NSE Indices factsheet. History before launch_date is
+    # back-calculated: NSE computed it after the fact, nobody could trade it.
+    launch_date: Optional[date] = None
+    base_date: Optional[date] = None
+    dates_source: Optional[str] = None
 
     @property
     def is_sector(self) -> bool:
@@ -78,3 +90,9 @@ class Exposure(BaseModel):
     @property
     def exchange_traded(self) -> list["ETFMapping"]:
         return [e for e in self.etfs if e.vehicle is VehicleType.ETF]
+
+    @property
+    def investable_from(self) -> Optional[date]:
+        """Earliest authoritative inception among its vehicles; None if none is dated."""
+        dates = [e.inception_date for e in self.etfs if e.inception_date is not None]
+        return min(dates) if dates else None

@@ -64,9 +64,13 @@ def _actions(target) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 # The v1.0 specification
 # --------------------------------------------------------------------------- #
-def test_the_v1_config_is_the_specified_strategy():
+def test_the_live_config_is_the_specified_strategy():
+    """v1.1 = v1.0 with the hurdle and cash accrual read from a liquid fund's NAV."""
     config = load_strategy_config()
-    assert config.version == "1.0"
+    assert config.version == "1.1"
+    assert config.cash_proxy.scheme_code == 118701
+    assert config.cash_proxy.name == "Nippon India Liquid Fund - Direct Plan - Growth Option"
+    assert config.backfill_policy == "include"
     assert (config.target_holdings_n, config.retention_buffer_m) == (2, 4)
     assert config.score_weights.method == "segment_composite"
     assert config.score_weights.segments == {"1M": 0.25, "3M-1M": 0.25, "6M-3M": 0.25, "12M-6M": 0.25}
@@ -238,7 +242,7 @@ def test_a_holding_that_loses_its_vehicle_is_sold():
     meta = _meta(SIX, a=ExposureMeta("a", "A", "sector", None))
     target = _build(prior={"a": 0.5, "b": 0.5}, meta=meta)
     assert _actions(target)["a"] == SELL
-    assert "No longer buyable" in next(d.reason for d in target.decisions if d.exposure_id == "a")
+    assert "Not buyable" in next(d.reason for d in target.decisions if d.exposure_id == "a")
 
 
 def test_raising_n_trims_existing_holdings():
@@ -305,19 +309,117 @@ def test_the_next_rebalance_is_the_coming_month_end():
     assert next_rebalance_date(pd.Timestamp("2026-10-30")) == pd.Timestamp("2026-11-30")
 
 
-def test_investability_is_point_in_time_from_vehicle_prices():
-    """A fund that launched in 2026 must not be buyable in 2022."""
-    index = pd.bdate_range("2021-01-01", "2026-08-31")
-    vehicles = pd.DataFrame(
-        {"NEW": pd.Series(1.0, index=index).where(index >= "2026-01-01"), "OLD": 1.0}, index=index
+def _registry(*exposures: dict):
+    from src.models.exposure import Exposure
+    from src.universe.registry import UniverseRegistry
+
+    return UniverseRegistry([Exposure.model_validate(e) for e in exposures])
+
+
+def _exposure(eid: str, *vehicles: dict, launch: str | None = None) -> dict:
+    return {"id": eid, "name": eid.upper(), "category": "sector", "benchmark": f"NIFTY {eid.upper()}",
+            "launch_date": launch, "base_date": "2005-04-01" if launch else None, "etfs": list(vehicles)}
+
+
+def _fund(name: str, code: int, inception: str | None) -> dict:
+    return {"name": name, "scheme_code": code, "vehicle": "index_fund", "inception_date": inception}
+
+
+def test_investability_is_point_in_time_from_recorded_inception_dates():
+    """A fund that incepted in 2026 must not be buyable in 2022; the earliest vehicle decides."""
+    registry = _registry(
+        _exposure("a", _fund("New Fund", 1, "2026-01-01")),
+        _exposure("b", _fund("Old Fund", 2, "2019-03-01"), _fund("Newer Fund", 3, "2024-01-01")),
+        _exposure("c", _fund("Undated Fund", 4, None)),
     )
-    universe = pd.DataFrame(
-        [{"exposure_id": "a", "symbol": "NEW", "name": "New ETF"},
-         {"exposure_id": "b", "symbol": "OLD", "name": "Old ETF"},
-         {"exposure_id": "c", "symbol": None, "name": "No History Fund"}]
-    )
-    meta = build_universe_metadata(["a", "b", "c"], universe, vehicles)
+    meta = build_universe_metadata(["a", "b", "c", "unknown"], registry)
     assert meta["a"].investable_from == pd.Timestamp("2026-01-01")
     assert not meta["a"].investable_on(pd.Timestamp("2022-06-30"))
+    assert meta["b"].investable_from == pd.Timestamp("2019-03-01")
     assert meta["b"].investable_on(pd.Timestamp("2022-06-30"))
+    # Fail safe: an undated vehicle, or an exposure the registry does not know, is never buyable.
     assert meta["c"].investable_from is None
+    assert meta["unknown"].investable_from is None
+
+
+def test_a_missing_etf_download_does_not_change_buyability():
+    """Nightly fund prices are not an input: an empty fetch leaves every decision unchanged."""
+    registry = _registry(*[_exposure(e, _fund(f"{e} fund", i + 1, "2015-01-01")) for i, e in enumerate(SIX)])
+    meta = build_universe_metadata(SIX.columns, registry)
+    with_prices = _build(meta=meta, prior={"c": 0.5, "d": 0.5})
+    assert with_prices.holdings == ("c", "d")
+    # Rebuilding the metadata after a night where every fund fetch failed changes nothing.
+    again = build_universe_metadata(SIX.columns, registry)
+    assert _build(meta=again, prior={"c": 0.5, "d": 0.5}).to_json() == with_prices.to_json()
+
+
+def test_inception_conflicts_flag_prices_before_a_recorded_inception():
+    from src.portfolio.universe import inception_conflicts
+
+    registry = _registry(_exposure("a", {**_fund("A ETF", 1, "2024-01-01"), "symbol": "AETF", "vehicle": "etf"}))
+    index = pd.bdate_range("2023-01-02", "2026-08-31")
+    early = pd.DataFrame({"AETF": 1.0}, index=index)
+    assert inception_conflicts(registry, early)
+    assert not inception_conflicts(registry, early.loc["2024-01-01":])
+
+
+def test_back_calculated_history_is_flagged_and_can_be_excluded():
+    """Before its NSE launch an index's history is back-calculated; v1.1 can run without it."""
+    meta = _meta(SIX, a=ExposureMeta("a", "A", "sector", pd.Timestamp("2020-01-01"),
+                                    launch_date=AS_OF + pd.Timedelta(days=30)))
+    included = _build(meta=meta)
+    assert included.ranking.at["a", "backcalculated"]
+    assert included.holdings == ("a", "b")
+    excluded = _build(meta=meta, config=_config(backfill_policy="exclude_prelaunch"))
+    assert excluded.holdings == ("b", "c")
+    assert excluded.ranking.at["a", "status"] == "before index launch (back-calculated history)"
+    sold = _build(meta=meta, prior={"a": 0.5, "b": 0.5}, config=_config(backfill_policy="exclude_prelaunch"))
+    assert {d.exposure_id: d.action for d in sold.decisions}["a"] == SELL
+
+
+def test_backcalculated_mask_marks_values_before_launch():
+    from src.portfolio.universe import backcalculated_mask
+
+    meta = _meta(SIX, a=ExposureMeta("a", "A", launch_date=INDEX[100]))
+    mask = backcalculated_mask(SIX, meta)
+    assert mask["a"].sum() == 100 and not mask["b"].any()
+
+
+# --------------------------------------------------------------------------- #
+# Cash: the hurdle and the accrual come from the liquid fund's NAV
+# --------------------------------------------------------------------------- #
+def _nav(annual: float, start: str = "2013-01-01", end: str = "2026-12-31") -> pd.Series:
+    days = pd.date_range(start, end, freq="D")
+    return pd.Series(1000 * (1 + annual) ** ((days - days[0]).days / 365.25), index=days)
+
+
+def test_the_hurdle_is_the_liquid_funds_trailing_12m_return():
+    from src.portfolio.cash import trailing_12m
+
+    nav = _nav(0.072)
+    value, source = trailing_12m(nav, AS_OF, 0.065)
+    assert source == "nav" and abs(value - 0.072) < 1e-3
+    target = _build(prices=SIX, config=_config())
+    assert target.cash_hurdle_source == "constant"
+    with_nav = construct_target_portfolio(AS_OF, SIX, _meta(SIX), None, _config(), nav)
+    assert with_nav.cash_hurdle_source == "nav" and abs(with_nav.cash_hurdle_12m - 0.072) < 1e-3
+
+
+def test_a_higher_cash_return_can_push_a_holding_out():
+    """f returns +5.2% over 12M: it clears a 4% liquid fund, not a 6% one."""
+    config = _config(retention_buffer_m=6)
+    low = construct_target_portfolio(AS_OF, SIX, _meta(SIX), {"f": 0.5, "a": 0.5}, config, _nav(0.04))
+    high = construct_target_portfolio(AS_OF, SIX, _meta(SIX), {"f": 0.5, "a": 0.5}, config, _nav(0.06))
+    assert {d.exposure_id: d.action for d in low.decisions}["f"] == HOLD
+    assert {d.exposure_id: d.action for d in high.decisions}["f"] == SELL
+
+
+def test_before_the_funds_history_the_constant_is_used():
+    from src.portfolio.cash import period_return, trailing_12m
+
+    late = _nav(0.072, start="2026-03-01")
+    assert trailing_12m(late, AS_OF, 0.065) == (0.065, "constant")
+    value, source = period_return(late, pd.Timestamp("2026-01-15"), pd.Timestamp("2026-02-15"), 0.065, 1 / 12)
+    assert source == "constant" and abs(value - (1.065 ** (1 / 12) - 1)) < 1e-12
+    value, source = period_return(late, pd.Timestamp("2026-04-01"), pd.Timestamp("2026-05-01"), 0.065, 1 / 12)
+    assert source == "nav" and abs(value - (late["2026-05-01"] / late["2026-04-01"] - 1)) < 1e-12

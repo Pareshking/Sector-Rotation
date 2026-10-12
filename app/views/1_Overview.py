@@ -160,7 +160,7 @@ controls = st.columns(2)
 only_grade = controls[0].toggle("Decision-grade only", value=True, key="overview_grade")
 only_tradeable = controls[1].toggle(
     "Buyable only", value=False, key="overview_tradeable",
-    help="Keep only exposures with a mapped ETF or index fund that had a price on the decision date.",
+    help="Keep only exposures with a mapped ETF or index fund that had incepted by the decision date.",
 )
 eligible = decisions[decisions.decision_eligible]
 table_frame = eligible if only_grade else decisions
@@ -172,8 +172,13 @@ ranked_table(
 )
 
 section("How a decision is reached")
+cash_basis = (
+    f"what {config.cash_proxy.name} returned over the same 12 months ({target.cash_hurdle_12m:.1%})"
+    if target.cash_hurdle_source == "nav" and config.cash_proxy is not None
+    else f"cash at {target.cash_hurdle_12m:.1%} (the liquid fund's NAV is not yet published)"
+)
 hurdle = (
-    f"its own 12-month return beats cash ({config.risk_free_rate_annual:.1%})"
+    f"its own 12-month return beats {cash_basis}"
     if config.absolute_momentum_filter == "dual_momentum_cash_hurdle"
     else "no absolute-momentum hurdle"
 )

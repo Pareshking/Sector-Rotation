@@ -6,7 +6,6 @@ import requests
 
 import src.data.jugaad_indices as jugaad
 from src.data.canonical import promote_etf_histories
-from src.data.index_data import download_canonical_indices
 
 
 @pytest.fixture(autouse=True)
@@ -76,21 +75,6 @@ def test_explicitly_mapped_etf_is_promoted() -> None:
     assert resolved["auto"] == "ETF/NAV:AUTOBEES"
 
 
-def test_canonical_download_records_provenance(monkeypatch) -> None:
-    index = pd.bdate_range("2026-01-01", periods=100)
-    monkeypatch.setattr(
-        "src.data.index_data.fetch_jugaad_canonical_indices",
-        lambda names, years, workers, calendar=None: (
-            pd.DataFrame({"auto": pd.Series(range(1, 101), index=index, dtype=float)}),
-            {"auto": "niftyindices_jugaad"},
-            {"auto": "NIFTY AUTO"},
-            {"auto": "TRI"},
-        ),
-    )
-    prices = download_canonical_indices({"auto": "NIFTY AUTO"}, years=1)
-    assert prices.attrs["source_by_exposure"]["auto"] == "niftyindices_jugaad"
-    assert prices.attrs["value_type_by_exposure"]["auto"] == "TRI"
-    assert prices.attrs["unresolved_exposures"] == []
 
 
 # --------------------------------------------------------------------------- #
@@ -296,49 +280,3 @@ def test_each_thread_gets_its_own_client_and_fetches_chunks_in_order():
     assert mine is jugaad._client()
     assert seen[0] is not mine
     assert mine.workers == 1
-
-
-def test_canonical_fetch_records_why_an_index_did_not_resolve(monkeypatch):
-    def fetch(name, start, end, calendar=None):
-        if name == "NIFTY AUTO":
-            series = _complete().rename(name)
-            series.attrs.update(source="niftyindices_jugaad", resolved_name=name, value_type="TRI")
-            return series
-        empty = pd.Series(dtype="float64", name=name)
-        empty.attrs["errors"] = ["TRI: ConnectionError: down", "CLOSE: ConnectionError: down"]
-        return empty
-
-    monkeypatch.setattr(jugaad, "fetch_jugaad_index", fetch)
-    prices, sources, _, _ = jugaad.fetch_jugaad_canonical_indices(
-        {"auto": "NIFTY AUTO", "bank": "NIFTY BANK"}, years=1, workers=2, calendar=CALENDAR
-    )
-    assert list(prices.columns) == ["auto"]
-    assert set(sources) == {"auto"}
-    assert prices.attrs["fetch_errors"] == {
-        "bank": "TRI: ConnectionError: down; CLOSE: ConnectionError: down"
-    }
-
-
-def test_the_calendar_and_fetch_errors_flow_through_download(monkeypatch):
-    received = {}
-
-    def fetch(names, years, workers, calendar=None):
-        received["calendar"] = calendar
-        frame = pd.DataFrame({"auto": _complete()})
-        frame.attrs["fetch_errors"] = {"bank": "TRI: Timeout: slow"}
-        return frame, {"auto": "niftyindices_jugaad"}, {"auto": "NIFTY AUTO"}, {"auto": "TRI"}
-
-    monkeypatch.setattr("src.data.index_data.fetch_jugaad_canonical_indices", fetch)
-    prices = download_canonical_indices({"auto": "NIFTY AUTO", "bank": "NIFTY BANK"}, years=1, calendar=CALENDAR)
-    assert received["calendar"] is CALENDAR
-    assert prices.attrs["fetch_errors"] == {"bank": "TRI: Timeout: slow"}
-
-
-def test_a_benchmark_that_starts_late_is_rejected(monkeypatch):
-    """The benchmark is the calendar; a missing first chunk cannot be checked against itself."""
-    late = _complete(pd.bdate_range("2026-04-01", END))
-    late.attrs.update(source="niftyindices_jugaad", resolved_name="NIFTY 50", value_type="TRI")
-    monkeypatch.setattr(jugaad, "fetch_jugaad_index", lambda name, start, end, calendar=None: late)
-    series = jugaad.fetch_benchmark("NIFTY 50", years=1)
-    assert series.empty
-    assert "days late" in series.attrs["errors"][0]

@@ -7,6 +7,7 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "processed"
+UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
 
 
 def _mtime(name: str) -> int:
@@ -17,7 +18,11 @@ def _mtime(name: str) -> int:
 
 
 def _stamp(*names: str) -> int:
-    return sum(_mtime(name) for name in names)
+    try:
+        universe = UNIVERSE_PATH.stat().st_mtime_ns
+    except OSError:
+        universe = 0
+    return sum(_mtime(name) for name in names) + universe
 
 
 @st.cache_data(show_spinner=False)
@@ -43,6 +48,13 @@ def load_etfs() -> pd.DataFrame:
 
 def load_etf_prices() -> pd.DataFrame:
     return read_parquet("etf_prices.parquet", _mtime("etf_prices.parquet"))
+
+
+def load_cash_nav():
+    """The liquid fund's NAV (the cash return), or None before the pipeline has written it."""
+    from src.portfolio.live import cash_series
+
+    return cash_series(read_parquet("cash_nav.parquet", _mtime("cash_nav.parquet")))
 
 
 BENCHMARK_COLUMN = "__benchmark__"
@@ -86,17 +98,19 @@ def _names() -> dict[str, str]:
 @st.cache_data(show_spinner=False)
 def _universe_metadata(modified_ns: int = 0):
     del modified_ns
+    from src.portfolio.live import load_registry
     from src.portfolio.universe import build_universe_metadata
 
     panel, _ = load_index_panel()
-    return build_universe_metadata(
-        panel.columns, load_etfs(), load_etf_prices(), _names(), exposure_categories()
-    )
+    return build_universe_metadata(panel.columns, load_registry(UNIVERSE_PATH), _names(), exposure_categories())
 
 
 def universe_metadata():
-    """Exposure id -> name, category and the first date a vehicle could be bought."""
-    return _universe_metadata(_stamp("index_prices.parquet", "etf_universe.parquet", "etf_prices.parquet"))
+    """Exposure id -> name, category, launch date and the first date a vehicle could be bought.
+
+    From universe.json's authoritative dates, never from the nightly fund prices.
+    """
+    return _universe_metadata(_stamp("index_prices.parquet", "summary_rankings.parquet"))
 
 
 @st.cache_data(show_spinner="Building the target portfolio…")
@@ -107,7 +121,7 @@ def _portfolio(modified_ns: int = 0):
     panel, _ = load_index_panel()
     if panel.empty:
         return None
-    return live_portfolio(panel, universe_metadata(), strategy_config())
+    return live_portfolio(panel, universe_metadata(), strategy_config(), load_cash_nav())
 
 
 def load_portfolio():
@@ -116,7 +130,7 @@ def load_portfolio():
     Built by ``src/portfolio`` from the published index panel and fund
     histories — the same call the backtest's final decision comes from.
     """
-    return _portfolio(_stamp("index_prices.parquet", "etf_universe.parquet", "etf_prices.parquet"))
+    return _portfolio(_stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet"))
 
 
 @st.cache_data(show_spinner=False)
@@ -148,7 +162,7 @@ def _decisions(modified_ns: int = 0) -> pd.DataFrame:
 
 def load_decisions() -> pd.DataFrame:
     """Summary rows annotated with the target portfolio's action for each, cached once."""
-    return _decisions(_stamp("summary_rankings.parquet", "index_prices.parquet", "etf_universe.parquet", "etf_prices.parquet"))
+    return _decisions(_stamp("summary_rankings.parquet", "index_prices.parquet", "cash_nav.parquet"))
 
 
 def _restrict(panel: pd.DataFrame, category: str) -> pd.DataFrame:
@@ -168,8 +182,9 @@ def backtest_config(
     absolute_filter: bool | None = None,
     investable_only: bool | None = None,
     cost_bps: float | None = None,
+    exclude_backcalculated: bool | None = None,
 ):
-    """The live strategy config with what-if overrides. ``None`` keeps the v1.0 value."""
+    """The live strategy config with what-if overrides. ``None`` keeps the live value."""
     base = strategy_config()
     changes: dict[str, object] = {}
     if top_n is not None:
@@ -184,6 +199,8 @@ def backtest_config(
         changes["require_investable"] = bool(investable_only)
     if cost_bps is not None:
         changes["cost_bps_per_side"] = float(cost_bps)
+    if exclude_backcalculated is not None:
+        changes["backfill_policy"] = "exclude_prelaunch" if exclude_backcalculated else "include"
     return base.replace(**changes) if changes else base
 
 
@@ -196,12 +213,12 @@ def _backtest(config_json: str, months: int | None, category: str, modified_ns: 
     panel, benchmark = load_index_panel()
     panel = _restrict(panel, category)
     config = StrategyConfig.model_validate_json(config_json)
-    return run_backtest(panel, benchmark, config, universe_metadata(), months=months)
+    return run_backtest(panel, benchmark, config, universe_metadata(), months=months, cash_nav=load_cash_nav())
 
 
 def load_backtest(config=None, months: int | None = None, category: str = "All"):
     config = config or strategy_config()
-    stamp = _stamp("index_prices.parquet", "etf_prices.parquet", "etf_universe.parquet")
+    stamp = _stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet")
     return _backtest(config.model_dump_json(), months, category, stamp)
 
 
@@ -275,11 +292,11 @@ def _sensitivity(config_json: str, months: int | None, category: str = "All", mo
             {**base.score_weights.model_dump(), **spec}).model_dump())
         for label, spec in SCORE_SCHEMES.items()
     }
-    return weight_sensitivity(panel, benchmark, schemes, universe_metadata(), months=months)
+    return weight_sensitivity(panel, benchmark, schemes, universe_metadata(), months=months, cash_nav=load_cash_nav())
 
 
 def load_sensitivity(config=None, months: int | None = None, category: str = "All"):
     """How much the result depends on the score specification rather than the strategy."""
     config = config or strategy_config()
-    stamp = _stamp("index_prices.parquet", "etf_prices.parquet", "etf_universe.parquet")
+    stamp = _stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet")
     return _sensitivity(config.model_dump_json(), months, category, stamp)
