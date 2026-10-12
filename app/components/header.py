@@ -99,8 +99,8 @@ def header_html(state: HeaderState) -> str:
         ]
     if state.as_of:
         parts += [sep, _stat("As of", state.as_of)]
-    if state.version:
-        parts += [sep, _stat("Strategy", f"v{state.version} · {state.config_hash}")]
+    # The rules' version and fingerprint live on the Method page; in the header
+    # they read as a second strategy (owner, 12 Oct 2026).
     pulse = "ds-pulse" if state.fresh else "ds-pulse stale"
     verdict = "Data fresh" if state.fresh else "Data stale"
     parts.append(

@@ -93,8 +93,9 @@ def test_the_header_shows_one_regime_the_hurdle_the_date_the_version_and_freshne
     text = _text(header_html(state))
     assert text.count("RISK-") == 1 and "RISK-OFF" in text
     for part in ("Nifty 50 TRI · 12M -8.3%", "liquid fund 12M 6.57%", "As of 09 Oct 2026",
-                 "Strategy v1.1 · e0c03c7a46ae", "Data fresh · updated 4h ago"):
+                 "Data fresh · updated 4h ago"):
         assert part in text, part
+    assert "e0c03c7a46ae" not in text, "the config fingerprint belongs on the Method page"
 
     stale = _text(header_html(HeaderState(regime="RISK-ON", benchmark_12m=0.1, cash_12m=0.065,
                                           cash_source="constant", age_hours=50.0)))
@@ -133,7 +134,7 @@ def test_the_shell_renders_the_status_header_above_the_default_page():
     assert not at.exception, [e.message for e in at.exception]
     text = " ".join(_text(m.value) for m in at.markdown)
     assert len(re.findall(r"Dual Momentum RISK-(?:ON|OFF) ", text)) == 1, "one regime chip in the header"
-    assert "As of" in text and "Strategy v" in text and re.search(r"Data (fresh|stale)", text)
+    assert "As of" in text and re.search(r"Data (fresh|stale)", text)
     assert "Portfolio value" in text, "the default page runs beneath the header"
 
 

@@ -99,19 +99,19 @@ with card("Current book", f"{len(view)} position{'s' if len(view) != 1 else ''} 
 # --------------------------------------------------------------------------- #
 # Mix and co-movement
 # --------------------------------------------------------------------------- #
-with card("Exposure mix"):
+navs = load_etf_prices()
+series = {str(r["Exposure"]): navs[r["key"]] for _, r in view.iterrows() if r.get("key") in navs.columns}
+mix, together = st.columns(2, gap="medium")  # side by side on a desktop, stacked on a phone
+with mix, card("Exposure mix"):
     rows = [(str(r["Exposure"]), float(r["Weight %"]), f"{r['Weight %']:.1f}%", False) for _, r in view.iterrows()]
     cash_weight = 100.0 * book.cash / value if value > 0 else 0.0
     rows.append(("Cash", cash_weight, f"{cash_weight:.1f}%", True))
     html_block(bar_list(rows, scale=100.0))
-
-navs = load_etf_prices()
-series = {str(r["Exposure"]): navs[r["key"]] for _, r in view.iterrows() if r.get("key") in navs.columns}
 if len(series) >= 2:
     returns = pd.DataFrame(series).dropna().pct_change().dropna().tail(90)
     corr = returns.corr()
     mean = float(corr.where(~np.eye(len(corr), dtype=bool)).stack().mean())
-    with card("How they move together", f"Average {mean:.2f}, {_correlation_note(mean)}"):
+    with together, card("How they move together", f"Average {mean:.2f}, {_correlation_note(mean)}"):
         correlation_heatmap(corr)
 
 # --------------------------------------------------------------------------- #
