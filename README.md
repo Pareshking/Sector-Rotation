@@ -54,7 +54,7 @@ code the backtest runs.
 
 ## Data hierarchy
 
-**Canonical index benchmarks.** Every canonical history is NSE / NiftyIndices data retrieved
+**Canonical index benchmarks.** Every canonical Nifty index history is NSE / NiftyIndices data retrieved
 through the [`jugaad-data`](https://pypi.org/project/jugaad-data/) adapter. jugaad-data is a
 *retrieval client*, not a data authority — it returns whichever series NSE serves.
 
@@ -66,6 +66,14 @@ Health page:
 - `TRI` — total return index, dividends reinvested.
 - `CLOSE` — price index, no dividend component.
 - `NAV` — an explicitly mapped ETF/fund NAV standing in for an index NSE cannot serve.
+
+**BSE indices.** An exposure marked `"index_provider": "bse"` in `universe.json` (BSE Insurance,
+BSE Hospitals) is fetched from **BSE Index Services** (`bseindices.com`, BSE's own index arm) by
+its numeric id and BSE index code (`src/data/bse_indices.py`), and must pass the same
+completeness check against the Nifty 50 calendar. BSE publishes only the *price* index without
+registration, so these series are `CLOSE`, never `TRI`: against the Nifty 50 TRI benchmark their
+relative strength is understated by roughly their dividend yield (BSE reports 0.38% for
+Insurance and 0.18% for Hospitals as of Sep 2026).
 
 Nothing is described as a total-return series unless NSE served one. The Nifty 50 benchmark is
 fetched from the same adapter, so both sides of every relative number share one calendar and one
@@ -88,7 +96,9 @@ for a canonical index history. The source that served each vehicle is recorded i
 **Authoritative dates.** `data/universe/universe.json` records, for every index, its NSE
 `launch_date` and `base_date` (from the index's NSE Indices factsheet) and, for every ETF and
 index fund, its `inception_date` (its first published NAV in AMFI's record, via MFAPI), each
-with its source. `tools/refresh_universe_dates.py` fills them; it is run by hand and its diff
+with its source (a BSE index's dates come from BSE Index Services' index description, its
+"Launch Date" and "First Value Date", and are recorded by hand). `tools/refresh_universe_dates.py`
+fills the rest; it is run by hand and its diff
 reviewed like code. A date the source does not state is left empty and reported, never guessed:
 NSE's factsheets for Nifty IT, MNC, PSE and Services give no launch date, and SBI Nifty IT ETF
 has no NAV history in AMFI's record.

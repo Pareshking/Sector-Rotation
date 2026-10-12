@@ -21,6 +21,7 @@ from src.data.contracts import enforce
 from src.data.etf_data import fetch_etf_histories
 from src.data.ingest import (
     BENCHMARK_ID,
+    IndexSource,
     ingest_cash,
     ingest_indices,
     ingest_vehicles,
@@ -36,6 +37,7 @@ from src.data.nse_etf import (
     resolve_snapshot,
 )
 from src.data.store import DEFAULT_OVERLAP_SESSIONS, RawStore
+from src.models.exposure import IndexProvider
 from src.portfolio.live import live_portfolio, target_frame
 from src.portfolio.score import score_exposures
 from src.portfolio.universe import (
@@ -70,11 +72,13 @@ MIN_PROMOTION_OBSERVATIONS = 60
 SEED_YEARS = 5
 BENCHMARK_COLUMN = "__benchmark__"
 
-# NSE index history through the jugaad-data retrieval adapter, plus explicitly
-# mapped ETF/NAV series for exposures NSE cannot serve. Nothing else is
-# decision-grade.
+# NSE index history through the jugaad-data retrieval adapter, BSE index
+# history from BSE Index Services (BSE's own index arm, for exposures marked
+# ``index_provider: "bse"``), plus explicitly mapped ETF/NAV series for
+# exposures NSE cannot serve. Nothing else is decision-grade.
 AUTHORITATIVE_CANONICAL_SOURCES = {
     "niftyindices_jugaad",
+    "bseindices",
     "etf_nav_authoritative",
 }
 
@@ -101,6 +105,15 @@ PRIMARY_CANONICAL_ETF_BY_EXPOSURE = {
     "pse": "MOPSE",
     "cpse": "CPSEETF",
 }
+
+
+def _index_sources(registry) -> dict[str, IndexSource]:
+    """Exposures whose index is not NSE's, with the provider identifiers to fetch them by."""
+    return {
+        e.id: IndexSource(e.index_provider.value, int(e.index_source_id), str(e.index_code))
+        for e in registry.all()
+        if e.index_provider is not IndexProvider.NSE
+    }
 
 
 def _etf_frame(registry):
@@ -175,6 +188,9 @@ def build_fixture(registry, days=1300):
     elapsed = (days_index - days_index[0]).days.to_numpy() / 365.25
     cash = pd.Series(1000.0 * 1.065**elapsed, index=days_index, name="nav")
     total = len(registry.all())
+    # The same lineage a live run records: BSE indices are price-only.
+    bse = {e.id for e in registry.all() if e.index_provider is IndexProvider.BSE}
+    sources = {e.id: "bseindices" if e.id in bse else "niftyindices_jugaad" for e in registry.all()}
     health = {
         "total_canonical_exposures": total,
         "valid_canonical_series": total,
@@ -183,9 +199,12 @@ def build_fixture(registry, days=1300):
         "fallback_canonical_exposures": [],
         "skipped_canonical_exposures": [],
         "missing_yfinance_symbols": [],
-        "source_counts": {"niftyindices_jugaad": total, "mfapi": int(etf_prices.shape[1])},
-        "source_by_canonical_exposure": {e.id: "niftyindices_jugaad" for e in registry.all()},
-        "value_type_by_canonical_exposure": {e.id: "TRI" for e in registry.all()},
+        "source_counts": {
+            **{s: sum(v == s for v in sources.values()) for s in sorted(set(sources.values()))},
+            "mfapi": int(etf_prices.shape[1]),
+        },
+        "source_by_canonical_exposure": sources,
+        "value_type_by_canonical_exposure": {e.id: "CLOSE" if e.id in bse else "TRI" for e in registry.all()},
         "benchmark_source": "niftyindices_jugaad",
         "benchmark_value_type": "TRI",
         "canonical_fetch_errors": {},
@@ -263,7 +282,9 @@ def build_live(
     stored_sources = {key: r.source for key, r in vehicle_reports.items() if r.source}
 
     _stage("Updating canonical index histories...")
-    prices, index_reports = ingest_indices(store, exposure_names, calendar, today, seed_years, overlap)
+    prices, index_reports = ingest_indices(
+        store, exposure_names, calendar, today, seed_years, overlap, index_sources=_index_sources(registry)
+    )
     source_by_exposure = {eid: r.source for eid, r in index_reports.items() if eid in prices and r.source}
     value_types = {eid: r.value_type for eid, r in index_reports.items() if eid in prices and r.value_type}
     resolved_names = {eid: exposure_names[eid] for eid in prices.columns}

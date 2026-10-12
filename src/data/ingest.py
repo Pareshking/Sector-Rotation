@@ -1,6 +1,7 @@
 """Store-and-merge ingestion: what the nightly pipeline fetches, and how.
 
-* **Index histories** (NSE via jugaad) are fetched incrementally: only from
+* **Index histories** (NSE via jugaad; BSE indices from BSE Index Services)
+  are fetched incrementally: only from
   ``overlap`` sessions before the last stored session onwards. The overlap is
   re-fetched on purpose; a value that changed there is a restatement, recorded
   and appended, never silently overwritten. An empty store is seeded with a
@@ -58,10 +59,34 @@ class SeriesIngest:
         return out
 
 
-def _fetcher():
+@dataclass(frozen=True)
+class IndexSource:
+    """Where a non-NSE index is fetched: its provider and the provider's identifiers."""
+
+    provider: str
+    source_id: int
+    index_code: str
+
+
+def _fetcher(provider: str = "nse"):
+    if provider == "bse":
+        from src.data.bse_indices import fetch_bse_index
+
+        return fetch_bse_index
+    if provider != "nse":
+        raise ValueError(f"unknown index provider {provider!r}")
     from src.data.jugaad_indices import fetch_jugaad_index
 
     return fetch_jugaad_index
+
+
+def _bound(fetch: Callable, source: IndexSource) -> Callable:
+    """``fetch`` with the provider's identifiers fixed, so update_index can call it like NSE's."""
+
+    def call(name, start, end, **kwargs):
+        return fetch(name, start, end, source_id=source.source_id, index_code=source.index_code, **kwargs)
+
+    return call
 
 
 def update_index(
@@ -124,14 +149,23 @@ def ingest_indices(
     overlap: int = DEFAULT_OVERLAP_SESSIONS,
     workers: int = 10,
     fetch: Callable | None = None,
+    index_sources: Mapping[str, IndexSource] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SeriesIngest]]:
-    """Update every exposure's index series; return the full stored panel and per-series reports."""
+    """Update every exposure's index series; return the full stored panel and per-series reports.
+
+    ``fetch`` serves NSE indices. An exposure listed in ``index_sources`` is
+    fetched from its own provider instead (BSE Index Services for a BSE
+    index); every other step — completeness, merge, restatements — is shared.
+    """
     reports: dict[str, SeriesIngest] = {}
     series: dict[str, pd.Series] = {}
+    index_sources = index_sources or {}
 
     def one(item):
         eid, name = item
-        return eid, update_index(store, eid, name, today, seed_years, overlap, calendar, fetch)
+        source = index_sources.get(eid)
+        fetcher = fetch if source is None else _bound(_fetcher(source.provider), source)
+        return eid, update_index(store, eid, name, today, seed_years, overlap, calendar, fetcher)
 
     with ThreadPoolExecutor(max_workers=min(workers, max(len(exposure_names), 1))) as pool:
         futures = [pool.submit(one, item) for item in exposure_names.items()]

@@ -101,8 +101,9 @@ def _fake_nse(calls, value_type_by_name=None, fail=()):
     """A stand-in for fetch_jugaad_index: a straight-line series over the requested window."""
     import pandas as pd
 
-    def fetch(name, start, end, calendar=None, value_types=("TRI", "CLOSE"), min_observations=60):
-        calls.append({"name": name, "start": pd.Timestamp(start), "calendar": calendar, "value_types": value_types})
+    def fetch(name, start, end, calendar=None, value_types=("TRI", "CLOSE"), min_observations=60, **provider_ids):
+        calls.append({"name": name, "start": pd.Timestamp(start), "calendar": calendar, "value_types": value_types,
+                      **provider_ids})
         if name in fail:
             empty = pd.Series(dtype=float)
             empty.attrs["errors"] = ["TRI: ConnectionError: down", "CLOSE: ConnectionError: down"]
@@ -124,7 +125,7 @@ def _offline(monkeypatch, fetch):
     import pipeline.run_pipeline as rp
     import src.data.ingest as ingest
 
-    monkeypatch.setattr(ingest, "_fetcher", lambda: fetch)
+    monkeypatch.setattr(ingest, "_fetcher", lambda provider="nse": fetch)
     monkeypatch.setattr(rp, "fetch_etf_histories", lambda etfs, years: (pd.DataFrame(), {}, {}))
 
     def no_cash(store, scheme_code, expected_name, fetch=None):

@@ -20,6 +20,7 @@ PROXY_SOURCES = {"benchmark_proxy", "etf_proxy"}
 # blank or a raw identifier the way ``niftyindices_jugaad`` previously did.
 SOURCE_LABELS = {
     "niftyindices_jugaad": "NSE / NiftyIndices via jugaad-data",
+    "bseindices": "BSE Index Services · price index",
     "niftyindices_tri": "NiftyIndices · TRI endpoint",
     "niftyindices_pr": "NiftyIndices · price endpoint",
     "nse_archive": "NSE archive",
