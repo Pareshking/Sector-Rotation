@@ -36,3 +36,33 @@ def rs_stage(rs_ratio_value: float, rs_momentum_value: float) -> str:
     if rs_ratio_value < 1.0 and rs_momentum_value < 0:
         return "Lagging"
     return "Improving"
+
+
+def signal_panel(prices: pd.DataFrame, benchmark: pd.Series) -> dict[str, pd.DataFrame]:
+    """Mansfield RS ratio and velocity for every date, per exposure (display only).
+
+    The RRG stage is a description of where an exposure sits in the rotation
+    cycle; since strategy v1.0 it decides nothing. Both inputs are
+    backward-looking — a 52-week rolling mean and a 13-week difference — so
+    row ``t`` uses only data available on day ``t``.
+    """
+    out: dict[str, pd.DataFrame] = {}
+    for column in prices.columns:
+        mrs = mansfield_relative_strength(prices[column], benchmark)
+        if mrs.dropna().empty:
+            continue
+        frame = pd.DataFrame({"ratio": 1.0 + mrs / 100.0, "velocity": rs_momentum(mrs)}).dropna()
+        if not frame.empty:
+            out[column] = frame
+    return out
+
+
+def signal_at(panel: dict[str, pd.DataFrame], exposure_id: str, asof: pd.Timestamp):
+    frame = panel.get(exposure_id)
+    if frame is None:
+        return None
+    window = frame.loc[:asof]
+    if window.empty:
+        return None
+    row = window.iloc[-1]
+    return float(row["ratio"]), float(row["velocity"])

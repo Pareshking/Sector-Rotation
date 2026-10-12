@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.charts import CHART_CONFIG, momentum_bar, returns_heatmap
-from app.components.metrics import action_counts
+from app.components.metrics import HELD_ACTIONS, action_counts
 from app.components.tables import BASES, BASIS_RELATIVE, ranked_table, signal_rows
 from app.components.theme import mobile_nav, inject_theme, kpi_strip, note, page_header, section, stage_legend
 from app.data import load_decisions, load_rs
@@ -33,29 +33,29 @@ if frame.empty:
 rs = load_rs()
 eligible = frame[frame.decision_eligible]
 counts = action_counts(frame)
-buy = eligible[eligible.model_action == "BUY"]
-sell = eligible[eligible.model_action == "REDUCE / EXIT"]
+held = eligible[eligible.model_action.isin(HELD_ACTIONS)]
+sell = eligible[eligible.model_action == "SELL"]
 
 kpi_strip(
     [
         ("Themes", counts["total"], "in the universe", ""),
-        ("Buy", counts["buy"], "full confirmation", "buy"),
-        ("Early turn", counts["improving"], "improving, not confirmed", "blue"),
-        ("Reduce / exit", counts["reduce"], "exit rule triggered", "red"),
+        ("In the portfolio", counts["held"], "held at the latest rebalance", "buy"),
+        ("Buy", counts["buy"], "new entries this rebalance", "buy"),
+        ("Sell", counts["sell"], "exits this rebalance", "red"),
     ]
 )
 
-section("Momentum leaderboard", "Composite Z-score · 0 is the universe average, not zero return")
+section("Momentum leaderboard", "Strategy score · 0 is the universe average, not zero return")
 stage_legend()
 st.plotly_chart(momentum_bar(eligible, limit=21), width="stretch", config=CHART_CONFIG)
 
 section("Return map", "Price return by horizon — the raw evidence under the Z-score")
 st.plotly_chart(returns_heatmap(eligible, limit=21), width="stretch", config=CHART_CONFIG)
 
-section("Actionable signals", "BUY and REDUCE / EXIT only")
-signals = pd.concat([buy, sell]).sort_values("rank") if len(buy) or len(sell) else buy
+section("In the target portfolio", "Held, bought or sold at the latest rebalance")
+signals = pd.concat([held, sell]).sort_values("rank") if len(held) or len(sell) else held
 if signals.empty:
-    note("No theme currently satisfies either the BUY or the REDUCE / EXIT rule.")
+    note("The target portfolio holds no theme and sold none at the latest rebalance.")
 else:
     signal_rows(signals, rs=rs)
 

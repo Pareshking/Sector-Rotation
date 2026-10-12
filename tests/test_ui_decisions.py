@@ -1,19 +1,80 @@
+import numpy as np
 import pandas as pd
 
 from app.components.metrics import decision_frame
 from app.components.theme import fmt_pct
+from src.config import load_strategy_config
+from src.portfolio.construct import construct_target_portfolio
+from src.portfolio.universe import ExposureMeta
+
+INDEX = pd.bdate_range(end="2026-08-31", periods=300)
+PRICES = pd.DataFrame(
+    {k: 100 * np.exp(v * np.arange(len(INDEX)))
+     for k, v in dict(a=0.0012, b=0.0010, c=0.0008, d=0.0006).items()},
+    index=INDEX,
+)
 
 
-def test_benchmark_proxy_is_never_actionable():
-    frame = pd.DataFrame([
-        {"exposure": "Proxy Theme", "data_source": "benchmark_proxy", "stage": "Leading", "rs_ratio": 1.2, "rs_momentum": 2.0, "momentum_z": 2.0, "rank": 1},
-        {"exposure": "Real Index", "data_source": "nse_archive", "stage": "Leading", "rs_ratio": 1.2, "rs_momentum": 2.0, "momentum_z": 2.0, "rank": 7},
-    ])
-    out = decision_frame(frame)
-    assert out.loc[out.exposure == "Proxy Theme", "model_action"].iat[0] == "DATA UNAVAILABLE"
-    assert bool(out.loc[out.exposure == "Proxy Theme", "decision_eligible"].iat[0]) is False
-    assert out.loc[out.exposure == "Real Index", "model_action"].iat[0] == "BUY"
-    assert "Rank 7" in out.loc[out.exposure == "Real Index", "analysis_note"].iat[0]
+def _portfolio(prior=None, meta=None):
+    meta = meta if meta is not None else {
+        e: ExposureMeta(e, e.upper(), "sector", pd.Timestamp("2020-01-01")) for e in PRICES
+    }
+    return construct_target_portfolio(INDEX[-1], PRICES, meta, prior, load_strategy_config())
+
+
+def _summary(ids=("a", "b", "c", "d"), **overrides):
+    return pd.DataFrame([_row(exposure=e.upper(), exposure_id=e, **overrides) for e in ids])
+
+
+def test_actions_come_from_the_target_portfolio_not_the_rrg_stage():
+    """Every row is marked Leading here; only the portfolio decides who is held."""
+    out = decision_frame(_summary(stage="Leading"), _portfolio(prior={"c": 0.5, "d": 0.5})).set_index("exposure_id")
+    assert out.loc["c", "model_action"] == "HOLD"
+    assert out.loc["d", "model_action"] == "HOLD"
+    assert out.loc["a", "model_action"] == "NOT HELD"
+    assert out.loc["c", "target_weight"] == 0.5
+    assert out.loc["a", "decision_status"] == "slots full"
+    assert out.loc["a", "decision_rank"] == 1
+
+
+def test_buys_and_sells_are_relative_to_the_previous_target():
+    out = decision_frame(_summary(), _portfolio(prior={"a": 0.5, "d": 0.5})).set_index("exposure_id")
+    assert out.loc["a", "model_action"] == "HOLD"
+    assert out.loc["d", "model_action"] == "HOLD"  # rank 4 is inside the buffer
+    fresh = decision_frame(_summary(), _portfolio()).set_index("exposure_id")
+    assert list(fresh.loc[["a", "b"], "model_action"]) == ["BUY", "BUY"]
+
+
+def test_without_a_portfolio_nothing_is_actionable():
+    out = decision_frame(_summary(), None)
+    assert set(out["model_action"]) == {"DATA UNAVAILABLE"}
+    assert not out["decision_eligible"].any()
+
+
+def test_an_unscorable_exposure_is_data_unavailable():
+    prices_meta = {e: ExposureMeta(e, e, "sector", pd.Timestamp("2020-01-01")) for e in PRICES}
+    out = decision_frame(_summary(ids=("a", "b", "zz")), _portfolio(meta=prices_meta)).set_index("exposure_id")
+    assert out.loc["zz", "model_action"] == "DATA UNAVAILABLE"
+    assert not out.loc["zz", "decision_eligible"]
+
+
+def test_buyable_follows_vehicle_history_on_the_decision_date():
+    meta = {e: ExposureMeta(e, e, "sector", pd.Timestamp("2020-01-01") if e != "a" else None) for e in PRICES}
+    out = decision_frame(_summary(), _portfolio(meta=meta)).set_index("exposure_id")
+    assert not out.loc["a", "tradeable"]
+    assert out.loc["b", "tradeable"]
+    assert out.loc["a", "model_action"] == "NOT HELD"
+
+
+
+
+def test_a_proxy_history_is_never_actionable_even_if_held():
+    summary = _summary(ids=("a", "b"))
+    summary.loc[summary.exposure_id == "a", "data_source"] = "benchmark_proxy"
+    out = decision_frame(summary, _portfolio()).set_index("exposure_id")
+    assert out.loc["a", "model_action"] == "DATA UNAVAILABLE"
+    assert not out.loc["a", "decision_eligible"]
+    assert out.loc["b", "model_action"] == "BUY"
 
 
 def test_returns_are_displayed_as_percentages():
@@ -35,22 +96,6 @@ def _row(**overrides):
     }
     base.update(overrides)
     return base
-
-
-def test_improving_exposure_is_flagged_as_an_early_turn():
-    """rs_stage puts Improving below its own 52-week RS average, so the bucket must not
-    require rs_ratio > 1 — that combination can never occur."""
-    frame = pd.DataFrame([_row(exposure="Early", stage="Improving", rs_ratio=0.98, rs_momentum=8.9)])
-    out = decision_frame(frame)
-    assert out["model_action"].iat[0] == "WATCH / IMPROVING"
-    assert out["watch_kind"].iat[0] == "Early turn"
-
-
-def test_leader_with_negative_velocity_is_marked_rolling_over():
-    frame = pd.DataFrame([_row(exposure="Fading", stage="Weakening", rs_ratio=1.23, rs_momentum=-8.4)])
-    out = decision_frame(frame)
-    assert out["model_action"].iat[0] == "WATCH"
-    assert out["watch_kind"].iat[0] == "Rolling over"
 
 
 def test_exposures_sharing_one_index_are_flagged_not_deduplicated():
@@ -92,14 +137,10 @@ def test_relative_ranking_reorders_versus_absolute():
     assert by_rel.exposure.iat[0] == "True leader"
 
 
-def test_rs_ratio_notes_describe_the_52_week_average_not_the_benchmark():
-    """rs_ratio is the RS line over its own 52-week mean; it says nothing about beating Nifty."""
-    frame = pd.DataFrame([
-        _row(exposure="Fading", stage="Weakening", rs_ratio=1.10, rs_momentum=-3.0),
-        _row(exposure="Early", stage="Improving", rs_ratio=0.95, rs_momentum=4.0),
-    ])
-    for note in decision_frame(frame)["analysis_note"]:
-        assert "52-week moving average" in note
+def test_notes_state_the_decision_date_and_never_claim_a_benchmark_comparison():
+    out = decision_frame(_summary(), _portfolio(prior={"c": 0.5, "d": 0.5}))
+    for note in out["analysis_note"]:
+        assert note.startswith("Decision at the 31 Aug 2026 close.")
         assert "the benchmark" not in note
 
 
@@ -126,3 +167,22 @@ def test_the_logo_links_to_the_site_root():
     source = (Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py").read_text(encoding="utf-8")
     assert 'link="https://dualmomentum.streamlit.app/"' in source
     assert "streamlit.app/Overview" not in source
+
+
+def test_dashboard_reasons_are_escaped_not_parsed_as_html():
+    """A reason contains 'rank <= 4'; rendered raw, '<=' swallowed the rest of the line."""
+    from pathlib import Path
+
+    import pytest
+    from streamlit.testing.v1 import AppTest
+
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "data" / "processed" / "index_prices.parquet").exists():
+        pytest.skip("no published dataset")
+    at = AppTest.from_file(str(root / "app" / "views" / "1_Overview.py"), default_timeout=240).run()
+    assert not at.exception
+    held_notes = [m.value for m in at.markdown if "Retained inside the buffer" in m.value or "New entry" in m.value]
+    assert held_notes
+    for value in held_notes:
+        assert "&lt;=" in value
+        assert "(rank cash" not in value

@@ -56,11 +56,17 @@ picker[1].number_input(
 )
 st.session_state["book_size"] = float(st.session_state.get("book_lakh", 30.0)) * 100000
 signal = decisions[decisions.exposure == exposure].iloc[0]
+
+
+def _rank_text(value: object) -> str:
+    rank = pd.to_numeric(value, errors="coerce")
+    return str(int(rank)) if pd.notna(rank) else "—"
+
 selected = etfs[etfs.exposure == exposure].copy() if not etfs.empty else pd.DataFrame()
 
-action = str(signal.get("model_action", "WATCH"))
+action = str(signal.get("model_action", "NOT HELD"))
 tone = ACTION_CLASS.get(action, "slate")
-tone = tone if tone in {"buy", "red", "blue", "grey"} else ""
+tone = tone if tone in {"buy", "red", "blue", "grey", "amber"} else ""
 shares = signal.get("shares_index_with")
 value_type = str(signal.get("value_type", "") or "")
 source_bits = [source_label(signal.get("data_source"))]
@@ -68,12 +74,13 @@ if value_type:
     source_bits.append(f"{value_type} series")
 source_bits.append(str(signal.get("resolved_official_index_name", "")))
 
-section("Model decision")
+section("Portfolio decision")
 st.markdown(
     f'<div class="hero hero-{tone or "grey"}"><div class="hero-top">'
     f'<span class="hero-act">{_esc(action)}</span>'
     f'<span class="pill pill-slate">{_esc(signal.get("stage", "—"))}</span>'
-    f'<span class="pill pill-grey">Rank {int(signal["rank"]) if signal["rank"] == signal["rank"] else "—"}</span>'
+    f'<span class="pill pill-grey">Decision rank {_rank_text(signal.get("decision_rank"))}</span>'
+    f'<span class="pill pill-grey">Target {fmt_pct(signal.get("target_weight", 0.0), 0)}</span>'
     f'</div><div class="hero-why">{_esc(signal.get("analysis_note", ""))}</div>'
     f'<div class="hero-src">{_esc(" · ".join(b for b in source_bits if b))}</div></div>',
     unsafe_allow_html=True,
@@ -88,8 +95,8 @@ if shares:
 
 kpi_strip(
     [
-        ("Momentum Z", fmt_num(signal.get("momentum_z")), "cross-sectional", ""),
-        ("RS ratio", fmt_num(signal.get("rs_ratio"), 3), "1.00 = Nifty 50", ""),
+        ("Score", fmt_num(signal.get("momentum_z")), "strategy score, latest session", ""),
+        ("RS ratio", fmt_num(signal.get("rs_ratio"), 3), "1.00 = its own 52-week average", ""),
         ("RS velocity", fmt_num(signal.get("rs_momentum"), 1), "13-week change", ""),
         ("12M return", fmt_pct(signal.get("return_12M")), "index level", ""),
     ]

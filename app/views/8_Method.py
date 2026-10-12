@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.metrics import get_metadata, health_summary
 from app.components.theme import mobile_nav, inject_theme, note, page_header, section
-from app.data import load_decisions
+from app.data import load_decisions, load_portfolio, strategy_config
 
 inject_theme()
 mobile_nav("Method")
@@ -25,6 +25,8 @@ page_header(
 health = health_summary()
 decisions = load_decisions()
 total = len(decisions) if not decisions.empty else 47
+config = strategy_config()
+live = load_portfolio()
 
 st.markdown(
     """
@@ -41,32 +43,45 @@ for one bet.
 """
 )
 
-section("2. The ranking")
+section("2. The score")
 st.markdown(
     """
-For each exposure and each lookback **L** ∈ {1M, 3M, 6M, 12M}:
+Every exposure with a full 12-month history is scored at the rebalance close on four
+**non-overlapping** segments of its log return, counted in sessions back from that close:
 
-- **Return** `R_L = P_t / P_{t−L} − 1`
-- **Relative return** `DM_L = R_exposure,L − R_Nifty50,L` — the part that matters. In a rising
-  market almost everything is up, so ranking on raw return mostly re-ranks the market.
-- **Z-score** `z_L` — the relative return standardised across the whole universe on that date.
+| Segment | Sessions | Weight (v{version}) |
+| --- | --- | --- |
+| **1M** — the latest month | 0–21 | {w1} |
+| **3M-1M** — months 2–3 | 21–63 | {w2} |
+| **6M-3M** — months 4–6 | 63–126 | {w3} |
+| **12M-6M** — months 7–12 | 126–252 | {w4} |
 
-The **composite momentum Z** is the weighted mean of the four z-scores. Weights are set once, in
-`universe.json`, and the same weights drive the live board and the backtest.
+Each segment is **z-scored across the universe** on that date and the four are combined with the
+weights above. The segments tile the year exactly once, so a weight means what it says. The
+overlapping 1M/3M/6M/12M composite this replaced weighted the latest month about 7.9× the oldest
+six through overlap alone. The latest month is never skipped: in this universe one-month momentum
+predicts positively, as industry momentum does (Moskowitz & Grinblatt 1999), rather than
+reversing as single stocks do.
 
 > **A Z-score is standardised to a mean of exactly zero.** Roughly half the universe is negative
-> by construction. A negative momentum Z means *below the universe average on that date* — not a
-> loss. An exposure can be up 8% over three months and still sit at −0.3.
+> by construction. A negative score means *below the universe average on that date* — not a loss.
 
-**Rank** is just the ordering of that composite. It is never a buy or sell trigger.
-"""
+An alternative, `vol_adjusted_12m` (12-month log return divided by the 126-session EWMA
+volatility), is implemented and can be selected in `strategy.json`; v{version} does not use it.
+""".format(
+        version=config.version,
+        w1=f"{config.score_weights.segments['1M']:.0%}",
+        w2=f"{config.score_weights.segments['3M-1M']:.0%}",
+        w3=f"{config.score_weights.segments['6M-3M']:.0%}",
+        w4=f"{config.score_weights.segments['12M-6M']:.0%}",
+    )
 )
 
-section("3. Relative strength and the four stages")
+section("3. Relative strength and the four stages · display only")
 st.markdown(
     """
-Separately from the ranking, each exposure is placed in a rotation stage using **Mansfield
-Relative Strength**, computed weekly:
+Separately from the score, each exposure is placed in a rotation stage using **Mansfield
+Relative Strength**, computed weekly. The stage describes; since strategy v1.0 it decides nothing:
 
 - Price relative `RS_t = P_exposure,t / P_Nifty50,t`, sampled each Friday
 - `MRS_t = 100 × (RS_t / SMA(RS_t, 52) − 1)` — how far the price relative sits above or below its
@@ -85,22 +100,48 @@ Relative Strength**, computed weekly:
 """
 )
 
-section("4. The decision rule")
+section("4. The portfolio rule")
 st.markdown(
     """
-| Action | Condition |
-| --- | --- |
-| **BUY** | Leading **and** RS ratio > 1 **and** RS velocity > 0 **and** momentum Z > 0 |
-| **REDUCE / EXIT** | Weakening or Lagging **and** RS ratio < 1 **and** RS velocity < 0 |
-| **WATCH / IMPROVING** | Improving stage with RS velocity positive |
-| **WATCH** | Decision-grade, but no full confirmation either way |
-| **DATA UNAVAILABLE** | No authoritative history, or a missing input |
+One pure function, `construct_target_portfolio` (`src/portfolio/construct.py`), makes every
+decision — on this dashboard, in the alerts and at every rebalance of the backtest. Its rules
+are versioned in `src/config/strategy.json` (v{version}, config `{hash}`):
 
-Every condition must hold — a high rank alone never produces a BUY. Rank 1 today is
-`{top}`, and it is **{action}**, which is the rule working as intended.
+1. **Eligible** — a full 12-month history and, because `require_investable` is on, a mapped ETF or
+   index fund with a price on the decision date. Eligible exposures are ranked by score.
+2. **Retention buffer** — a current holding is kept while its rank is ≤ **{m}**.
+3. **Entry** — an empty slot is filled only from ranks ≤ **{n}**, best first, never deeper.
+4. **Cash hurdle** — an exposure is held only while its own 12-month return beats the 12-month
+   cash return (**{rf}**). A top-ranked name that fails leaves its slot in cash rather than handing
+   it to a weaker name: relative momentum picks, absolute momentum decides whether to be invested.
+5. **Weights** — each slot is 1/{n} of the book; unfilled slots are cash.
+
+| Action | Meaning |
+| --- | --- |
+| **BUY** | Enters the target (or its weight rises) |
+| **HOLD** | Stays in the target at the same weight |
+| **TRIM** | Stays, at a lower weight |
+| **SELL** | Leaves the target |
+| **NOT HELD** | Scored, but not in the target — the status says why |
+| **DATA UNAVAILABLE** | No authoritative 12-month history |
+
+The buffer makes the strategy path-dependent — whether a rank-3 name is held depends on whether
+it was held last month — so the live target is the end of the strategy's own decision chain over
+every completed month in the data, the same chain the backtest replays.
+{latest}
 """.format(
-        top=decisions.iloc[0]["exposure"] if not decisions.empty else "—",
-        action=decisions.iloc[0]["model_action"] if not decisions.empty else "—",
+        version=config.version,
+        hash=config.config_hash,
+        m=config.retention_buffer_m,
+        n=config.target_holdings_n,
+        rf=f"{config.risk_free_rate_annual:.1%}",
+        latest=(
+            f"\nThe latest decision, at the **{live.target.as_of:%d %b %Y}** close, holds "
+            + (", ".join(f"**{decisions.set_index('exposure_id')['exposure'].get(e, e)}**" for e in live.target.holdings) or "**cash only**")
+            + f" with {live.target.cash_weight:.0%} in cash."
+            if live is not None and not decisions.empty
+            else ""
+        ),
     )
 )
 
@@ -148,41 +189,42 @@ matter more than liquidity.
 section("7. The backtest")
 st.markdown(
     """
-On the last trading day of each period the universe is ranked using **only prices up to that
-day**, by the same `rank_exposures` that produces the live board. The top *N* are held until the
-next rebalance, so a decision's return is earned entirely after the decision.
+The backtest has no rules of its own: at every month-end close it calls the same decision chain
+as this dashboard, using **only prices up to that close**, and does the accounting.
 
-Three universes, each stricter than the last:
+**Signal at t, fill at t+1.** A decision formed at the month-end close is executed at the next
+session's close. The old portfolio earns the session in between, and each period runs from one
+fill to the next.
+
+**Costs are charged.** {bps:g} bps per side on every unit of weight bought or sold, deducted at
+the fill. Cash earns {rf}, the same rate as the hurdle and the Sharpe ratio.
+
+Two universes:
 
 | Mode | What it measures |
 | --- | --- |
-| **All indices** | The signal. Buys the top-ranked index whether or not a fund existed. |
-| **Buyable only** | The portfolio. A pick must have had a real fund trading **on that date**. |
-| **Buyable + entry rule** | What this app would have told you. Also requires the BUY rule. |
+| **Strategy (buyable)** | The portfolio. A pick must have had a real fund with a price **on that date**. |
+| **All indices** | The signal. The same rules over every index, whether or not a fund existed. |
 
 Investability is judged from each vehicle's own price history, never from today's lineup — most
 of these funds launched in 2024–25, so treating them as available in 2021 would be look-ahead of
-the worst kind. When a top pick fails a test the next is taken, down to a set rank; past that the
-slot goes to cash. **All indices** still ranks the full 47-exposure universe at every historical
-date, including exposures whose fund did not exist yet — it measures the signal, not a portfolio
-anyone could have held, precisely because it skips this gate.
+the worst kind.
 
-**The history window is not the return window.** The ranking needs a full 12-month history before
-it can choose anything, so a 60-month window yields 48 months of returns.
-
-**A rebalance transacts at the same close used to rank it.** The signal is computed from prices
-through the rebalance date, and the return is also measured from that date's close. A real order
-placed after seeing that close fills at least one session later, so this is a small, favourable
-timing assumption — modest at a monthly cadence, but real.
+**The history window is not the return window.** The score needs a full 12-month history before
+it can choose anything, so the first year of data is warm-up.
 
 **"Buyable" means a fund existed, not that it was easy to trade.** Investability only checks price
 history; it does not check historical liquidity, spread, AUM, or whether an index fund was even
-open to subscriptions on that date. A rank-3 substitution in 2022 could have been in a much
-thinner fund than the same name would be today.
+open to subscriptions on that date.
 
-**Transaction costs are deliberately zero.** No brokerage, spread, STT, expense or tax, so a real
-book earns less — and more so at higher turnover.
-"""
+**v{version} was specified after studying this window.** The segment weights, N, the buffer and the
+hurdle were fixed before this backtest was run, but by people who had looked at these four years.
+Treat it as a check on the rules, not as out-of-sample evidence.
+""".format(
+        bps=config.cost_bps_per_side,
+        rf=f"{config.risk_free_rate_annual:.1%}",
+        version=config.version,
+    )
 )
 note(
     "<b>Read the sensitivity grid before trusting any single result.</b> Running the same window "
@@ -221,17 +263,19 @@ if health:
         if value_types and tri == len(value_types)
         else f"{tri} of {len(value_types)} total-return"
     )
-    weights = metadata.get("momentum_weights") or {}
-    if weights and len(set(weights.values())) == 1:
+    weights = config.score_weights.segments
+    if config.score_weights.method != "segment_composite":
+        weight_note = config.score_weights.method
+    elif len(set(weights.values())) == 1:
         weight_note = "equal across " + " / ".join(weights)
     else:
-        weight_note = " / ".join(f"{k} {v:.0%}" for k, v in weights.items()) or "unknown"
+        weight_note = " / ".join(f"{k} {v:.0%}" for k, v in weights.items())
     section("Current state")
     st.markdown(
         f"- **{health['decision_grade']}/{health['total']}** decision-grade histories, "
         f"{value_note}\n"
         f"- **{health['etf_valid']}/{health['etf_total']}** fund price histories ingested\n"
-        f"- Composite weights: {weight_note}\n"
+        f"- Strategy v{config.version} (config {config.config_hash}); score weights: {weight_note}\n"
         f"- Last refreshed **{health['updated']}**"
     )
 

@@ -1,15 +1,15 @@
-"""Decision boundary, data-health telemetry, and lineage helpers."""
+"""Target-portfolio annotation, data-health telemetry, and lineage helpers."""
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from app.components.theme import _esc, fmt_num, fmt_signed
+from app.components.theme import _esc
+from src.formatting import format_updated
 
 ROOT = Path(__file__).resolve().parents[2]
 METADATA_PATH = ROOT / "data" / "processed" / "metadata.json"
@@ -62,29 +62,6 @@ def load_metadata(modified_ns: int = 0) -> dict[str, object]:
 
 def get_metadata() -> dict[str, object]:
     return load_metadata(_metadata_mtime())
-
-
-def format_updated(raw: object) -> tuple[str, str]:
-    """Return (absolute, relative) labels for the pipeline timestamp.
-
-    The raw value is a microsecond ISO string, which is unreadable in a header.
-    """
-    text = str(raw or "")
-    try:
-        stamp = datetime.fromisoformat(text)
-    except ValueError:
-        return (text or "unknown", "")
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    absolute = stamp.strftime("%d %b %Y · %H:%M UTC")
-    hours = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600.0
-    if hours < 1:
-        relative = "just now"
-    elif hours < 24:
-        relative = f"{int(hours)}h ago"
-    else:
-        relative = f"{int(hours // 24)}d ago"
-    return absolute, relative
 
 
 def health_summary(metadata: dict[str, object] | None = None) -> dict[str, object]:
@@ -161,44 +138,6 @@ def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("exposure", ignore_index=True)
 
 
-def _analysis_note(row: dict[str, object], action: str) -> str:
-    stage = str(row.get("stage", "Unknown"))
-    ratio = fmt_num(row.get("rs_ratio"))
-    velocity = fmt_signed(row.get("rs_momentum"))
-    momentum = fmt_signed(row.get("momentum_z"))
-    rank = pd.to_numeric(row.get("rank"), errors="coerce")
-    rank_text = f"Rank {int(rank)}" if rank == rank else "Rank unavailable"
-
-    if action == "BUY":
-        return (
-            f"{stage}; RS ratio {ratio} (> 1); RS velocity {velocity} (> 0); "
-            f"momentum Z {momentum} (> 0). {rank_text} is informational — rank does not gate BUY."
-        )
-    if action == "REDUCE / EXIT":
-        return (
-            f"{stage}; RS ratio {ratio} (< 1); RS velocity {velocity} (< 0). "
-            f"{rank_text} is informational — the exit rule is signal-based, not rank-based."
-        )
-    if action == "WATCH / IMPROVING":
-        return (
-            f"{stage}; RS ratio {ratio}: the RS line is still below its own 52-week moving "
-            f"average, but RS velocity {velocity} has turned positive. This is an early turn, "
-            f"not a confirmed BUY. {rank_text}."
-        )
-    if action == "DATA UNAVAILABLE":
-        return (
-            "No authoritative decision-grade index history is available. Excluded from "
-            "BUY/REDUCE decisions rather than replaced with a proxy."
-        )
-    if stage == "Weakening":
-        return (
-            f"{stage}; RS ratio {ratio}: the RS line is still above its own 52-week moving "
-            f"average, but RS velocity {velocity} has rolled over. Leadership is fading before the "
-            f"exit rule triggers. {rank_text}."
-        )
-    return f"{stage}; the full BUY or REDUCE confirmation is not present. {rank_text}."
-
-
 def _shared_index_map(frame: pd.DataFrame) -> pd.Series:
     """Flag exposures that resolve to the same underlying Nifty index.
 
@@ -221,77 +160,97 @@ def _shared_index_map(frame: pd.DataFrame) -> pd.Series:
     return out
 
 
-def decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
-    """Apply the deterministic decision boundary to prepared model output."""
+# The actions a row can carry. BUY / HOLD / TRIM / SELL come straight from the
+# target portfolio (src/portfolio/construct.py); everything else is either not
+# in the portfolio or could not be scored. The RRG stage is display only.
+PORTFOLIO_ACTIONS = ("BUY", "HOLD", "TRIM", "SELL")
+NOT_HELD = "NOT HELD"
+UNAVAILABLE = "DATA UNAVAILABLE"
+HELD_ACTIONS = {"BUY", "HOLD", "TRIM"}
+
+
+def decision_frame(summary: pd.DataFrame, portfolio=None) -> pd.DataFrame:
+    """Summary rows annotated with what the target portfolio does with each exposure.
+
+    ``portfolio`` is the ``TargetPortfolio`` produced by
+    ``construct_target_portfolio`` at the latest rebalance — the same object
+    the backtest's final decision is. Without one, nothing is actionable.
+    """
     if summary is None or summary.empty:
         return summary.copy() if summary is not None else pd.DataFrame()
-
     frame = summary.copy()
-    nan = pd.Series(float("nan"), index=frame.index)
+    ids = frame["exposure_id"].astype(str) if "exposure_id" in frame else frame.index.astype(str)
     source = frame.get("data_source", pd.Series("", index=frame.index)).fillna("").astype(str)
-    stage = frame.get("stage", pd.Series("", index=frame.index)).fillna("").astype(str)
-    ratio = pd.to_numeric(frame.get("rs_ratio", nan), errors="coerce")
-    velocity = pd.to_numeric(frame.get("rs_momentum", nan), errors="coerce")
-    momentum = pd.to_numeric(frame.get("momentum_z", nan), errors="coerce")
-
-    # Proxy histories are never decision data. This also protects the UI from
-    # stale processed datasets until the next clean live pipeline refresh.
     proxy = source.isin(PROXY_SOURCES)
-    valid = ratio.notna() & velocity.notna() & momentum.notna()
-    buy = (~proxy) & valid & stage.eq("Leading") & ratio.gt(1.0) & velocity.gt(0) & momentum.gt(0)
-    reduce = (~proxy) & valid & stage.isin(["Weakening", "Lagging"]) & ratio.lt(1.0) & velocity.lt(0)
-    # An Improving exposure by definition has its RS line below its own 52-week
-    # moving average (rs_stage puts rs_ratio < 1 with rising momentum here), so the
-    # previous ``ratio > 1``
-    # clause could never be satisfied and this bucket never rendered.
-    improving = (~proxy) & valid & stage.eq("Improving") & velocity.gt(0)
 
-    frame["decision_eligible"] = (~proxy) & valid
-    frame["model_action"] = "WATCH"
-    frame.loc[proxy, "model_action"] = "DATA UNAVAILABLE"
-    frame.loc[~valid & ~proxy, "model_action"] = "DATA UNAVAILABLE"
-    frame.loc[improving, "model_action"] = "WATCH / IMPROVING"
-    frame.loc[buy, "model_action"] = "BUY"
-    frame.loc[reduce, "model_action"] = "REDUCE / EXIT"
+    if portfolio is None:
+        frame["model_action"] = UNAVAILABLE
+        frame["decision_eligible"] = False
+        frame["tradeable"] = False
+        frame["target_weight"] = 0.0
+        frame["prior_weight"] = 0.0
+        frame["decision_rank"] = float("nan")
+        frame["decision_status"] = ""
+        frame["decision_reason"] = "No target portfolio: the index price panel is not available."
+        frame["analysis_note"] = frame["decision_reason"]
+        frame["shares_index_with"] = _shared_index_map(frame)
+        return frame
 
-    frame["decision_reason"] = "Full BUY/REDUCE confirmation is not present"
-    frame.loc[buy, "decision_reason"] = (
-        "Leading + RS ratio > 1 + positive RS velocity + positive momentum"
-    )
-    frame.loc[reduce, "decision_reason"] = "Weakening/Lagging + RS ratio < 1 + negative RS velocity"
-    frame.loc[improving, "decision_reason"] = "Improving + RS velocity has turned positive"
-    frame.loc[proxy, "decision_reason"] = (
-        "No authoritative history; proxy data is deliberately excluded"
-    )
-    frame.loc[~valid & ~proxy, "decision_reason"] = "Required RS/momentum input is unavailable"
+    ranking = portfolio.ranking
+    decisions = {d.exposure_id: d for d in portfolio.decisions}
+    frame["decision_rank"] = ids.map(ranking["rank"]).astype(float).to_numpy()
+    frame["strategy_score"] = ids.map(ranking["score"]).astype(float).to_numpy()
+    frame["target_weight"] = ids.map(portfolio.weights).fillna(0.0).astype(float).to_numpy()
+    frame["prior_weight"] = ids.map(ranking["prior_weight"]).fillna(0.0).astype(float).to_numpy()
+    frame["decision_status"] = ids.map(ranking["status"]).fillna("").to_numpy()
+    scorable = ids.map(ranking["valid"]).eq(True).to_numpy()
+    frame["decision_eligible"] = scorable & ~proxy.to_numpy()
+    frame["tradeable"] = ids.map(ranking["investable"]).eq(True).to_numpy()
 
-    # Presentation-only sub-state. It never changes BUY/REDUCE, but it stops a
-    # rolling-over rank-1 leader from looking identical to a flat neutral name.
-    frame["watch_kind"] = ""
-    plain_watch = frame["model_action"].eq("WATCH")
-    frame.loc[plain_watch & stage.eq("Weakening"), "watch_kind"] = "Rolling over"
-    frame.loc[plain_watch & stage.eq("Leading"), "watch_kind"] = "Holding"
-    frame.loc[frame["model_action"].eq("WATCH / IMPROVING"), "watch_kind"] = "Early turn"
-
+    actions, reasons = [], []
+    for eid, eligible, is_proxy in zip(ids, frame["decision_eligible"], proxy):
+        decision = decisions.get(eid)
+        if is_proxy:
+            # The pipeline never admits a proxy into the price panel; this is the
+            # backstop for a stale dataset generated before that rule existed.
+            actions.append(UNAVAILABLE)
+            reasons.append("No authoritative history; proxy data is deliberately excluded.")
+        elif decision is not None:
+            actions.append(decision.action)
+            reasons.append(decision.reason)
+        elif not eligible:
+            actions.append(UNAVAILABLE)
+            reasons.append(
+                "No authoritative 12-month history; excluded from the portfolio rather than "
+                "replaced with a proxy."
+            )
+        else:
+            status = str(ranking["status"].get(eid, "") or "")
+            detail = str(ranking["reason"].get(eid, "") or "")
+            actions.append(NOT_HELD)
+            reasons.append(f"Not held ({status}): {detail}." if detail else f"Not held ({status}).")
+    frame["model_action"] = actions
+    frame["decision_reason"] = reasons
+    as_of = f"{pd.Timestamp(portfolio.as_of):%d %b %Y}"
+    frame["analysis_note"] = [f"Decision at the {as_of} close. {r}" for r in reasons]
     frame["shares_index_with"] = _shared_index_map(frame)
-    frame["tradeable"] = False
-    frame["analysis_note"] = [
-        _analysis_note(row, str(row["model_action"])) for row in frame.to_dict("records")
-    ]
     return frame
 
 
 def action_counts(frame: pd.DataFrame) -> dict[str, int]:
-    if frame is None or frame.empty:
-        return {"total": 0, "eligible": 0, "buy": 0, "reduce": 0, "improving": 0, "watch": 0}
+    keys = ("total", "eligible", "held", "buy", "hold", "trim", "sell", "not_held")
+    if frame is None or frame.empty or "model_action" not in frame:
+        return dict.fromkeys(keys, 0)
     action = frame["model_action"]
     return {
         "total": len(frame),
         "eligible": int(frame["decision_eligible"].sum()),
+        "held": int(action.isin(HELD_ACTIONS).sum()),
         "buy": int((action == "BUY").sum()),
-        "reduce": int((action == "REDUCE / EXIT").sum()),
-        "improving": int((action == "WATCH / IMPROVING").sum()),
-        "watch": int((action == "WATCH").sum()),
+        "hold": int((action == "HOLD").sum()),
+        "trim": int((action == "TRIM").sum()),
+        "sell": int((action == "SELL").sum()),
+        "not_held": int((action == NOT_HELD).sum()),
     }
 
 

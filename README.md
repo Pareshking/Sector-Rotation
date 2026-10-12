@@ -17,35 +17,39 @@ Universe Registry -> Exposure -> canonical Nifty benchmark   ETF price + NAV
           +--> explicit ETF/NAV promotion (mapped exposures only)
           |
           v
-Quantitative engine
-  - 1M / 3M / 6M / 12M relative returns
-  - weekly Mansfield Relative Strength
-  - cross-sectional Z-scores and percentile ranks
-  - RS ratio + RS momentum stage
-  - monthly top-N rotation backtest
-          |
-          v
 Prepared Parquet + metadata.json
           |
           v
-Streamlit UI (read-only)
+src/config/strategy.json  (strategy v1.0: N, buffer M, score, hurdle, fill, cost)
+          |
+          v
+src/portfolio  — pure, no I/O, no Streamlit
+  - score.py      non-overlapping segment composite (1M, 3M-1M, 6M-3M, 12M-6M)
+  - universe.py   point-in-time investability from vehicle price history
+  - construct.py  construct_target_portfolio + decision_chain
+          |
+          +--> live.py          current target  -> Streamlit dashboard, tools/detect_alerts.py
+          +--> backtest.py      same chain + t+1 fills, costs, cash accrual
+          |
+Display only: Mansfield RS, RRG stage, durability analytics (src/quantitative)
 ```
 
 ## Application map
 
 | Page | Question it answers |
 | --- | --- |
-| **Dashboard** | What does the model say to do today, and how much of the universe is leading? |
-| **Sectors** | Which sectors lead, which are rolling over, and what do their returns look like across horizons? |
+| **Dashboard** | What does the target portfolio hold after the latest month-end rebalance, what must I trade, and when is the next rebalance? |
+| **Sectors** | Which sectors are held or rank highest, and what do their returns look like across horizons? |
 | **Themes** | The same, for thematic exposures. |
 | **Screener** | Filter and sort the whole universe on any column and any lookback. |
-| **Backtest** | Would following this ranking have beaten Nifty 50 over the last 1–5 years? |
+| **Backtest** | Would the strategy the dashboard shows have beaten Nifty 50, after costs? |
 | **Exposure** | For one exposure: the decision, the relative-strength path, and the funds that implement it. |
 | **Data Health** | Where every series came from, what it actually is, and what is missing. |
-| **Method** | The complete theory in one page: ranking, stages, decision rule, backtest, provenance. |
+| **Method** | The complete theory in one page: score, portfolio rule, stages, backtest, provenance. |
 
 Every page is read-only. The app performs no downloads at page load; it reads prepared files
-from `data/processed/`.
+from `data/processed/` and builds the target portfolio from them with `src/portfolio`, the same
+code the backtest runs.
 
 ## Data hierarchy
 
@@ -143,28 +147,69 @@ is actually about. Absolute stays one click away because it is what a holder ear
 Note that `rs_ratio = 1 + MRS/100` by construction, so `rs_matrix.parquet` carries the full
 history of both RRG axes even though the summary stores only their latest values.
 
-### Stage
+### Stage (display only)
 
 - **Leading:** RS ratio >= 1 and momentum >= 0
 - **Weakening:** RS ratio >= 1 and momentum < 0
 - **Lagging:** RS ratio < 1 and momentum < 0
 - **Improving:** RS ratio < 1 and momentum >= 0
 
-### Decision boundary
+The stage describes where an exposure's RS line sits against its own 52-week average. Since
+strategy v1.0 it decides nothing; it is shown for context.
 
-| Action | Condition |
+### Strategy score (v1.0)
+
+Every exposure with a full 12-month history is scored at the rebalance close on four
+**non-overlapping** segments of its log return, in sessions back from that close:
+
+| Segment | Sessions | Weight |
+| --- | --- | --- |
+| `1M` | 0–21 | 25% |
+| `3M-1M` | 21–63 | 25% |
+| `6M-3M` | 63–126 | 25% |
+| `12M-6M` | 126–252 | 25% |
+
+Each segment is z-scored across the universe on that date, and the score is the weighted sum.
+Lookbacks are positions on one shared session calendar, so every exposure is measured over the
+same sessions. The segments tile the year exactly once; the overlapping 1M/3M/6M/12M composite
+this replaced weighted the latest month about 7.9× the oldest six through overlap alone.
+
+**The latest month is never skipped.** In single stocks one-month returns reverse (Jegadeesh
+1990), which is why stock momentum uses 12-1. Industry portfolios behave differently
+(Moskowitz & Grinblatt 1999): their one-month momentum continues, and in this universe the
+one-month segment predicts positively. A 12-1 lookback is deliberately not used.
+
+An alternative score, `vol_adjusted_12m` (12-month log return over 126-session EWMA volatility),
+is implemented and selectable in `strategy.json`. v1.0 does not use it.
+
+### Portfolio rule (v1.0)
+
+`construct_target_portfolio` in `src/portfolio/construct.py` is the only place a holding is
+decided. The dashboard, the alert tool and every rebalance of the backtest call it:
+
+1. **Eligible** — scorable and, with `require_investable`, buyable on the date: a mapped ETF or
+   index fund already had a price. Eligible exposures are ranked by score.
+2. **Retention buffer** — a holding is kept while its rank is ≤ `retention_buffer_m` (4).
+3. **Entry** — a vacant slot is filled only from ranks ≤ `target_holdings_n` (2), best first.
+4. **Cash hurdle** (`dual_momentum_cash_hurdle`) — an exposure is held only while its own
+   12-month return beats the 12-month cash return (6.5%). A top-ranked name that fails leaves its
+   slot in cash; it is never handed to a weaker name.
+5. **Weights** — each slot is 1/N of the book; unfilled slots are cash.
+
+| Action | Meaning |
 | --- | --- |
-| `BUY` | Leading + RS ratio > 1 + RS velocity > 0 + momentum Z > 0 |
-| `REDUCE / EXIT` | Weakening or Lagging + RS ratio < 1 + RS velocity < 0 |
-| `WATCH / IMPROVING` | Improving stage with RS velocity > 0 — RS line still below its own 52-week moving average, no longer falling further below it |
-| `WATCH` | Decision-grade, but no full confirmation either way |
-| `DATA UNAVAILABLE` | Proxy history, or a missing RS/momentum input |
+| `BUY` | Enters the target, or its weight rises |
+| `HOLD` | Stays at the same weight |
+| `TRIM` | Stays, at a lower weight |
+| `SELL` | Leaves the target |
+| `NOT HELD` | Scored but not in the target; `decision_status` says why |
+| `DATA UNAVAILABLE` | No authoritative 12-month history, or a proxy source |
 
-Rank is a strength ordering. It is never a BUY or SELL gate.
-
-`WATCH` additionally carries a presentation-only `watch_kind` (`Rolling over`, `Holding`,
-`Early turn`) so a rank-1 leader whose velocity has turned negative does not look identical to a
-flat neutral name. It does not change any action.
+The buffer makes the strategy path-dependent: whether a rank-3 name is held depends on whether it
+was held last month. The live target is therefore the end of `decision_chain` over every completed
+month in the data — the same chain the backtest replays. `tests/test_live_equals_backtest.py`
+asserts the two are identical byte for byte, and that a decision never reads a price after its
+own date.
 
 Two exposures may not resolve to the same underlying index. `validate_universe` rejects it, and
 the pipeline fails closed, because one index behind two exposures occupies two ranks while
@@ -176,9 +221,10 @@ generated before the rule existed.
 
 ### Tradeability
 
-An exposure with a BUY and no instrument is research, not a position. The dashboard says so:
-signals with no listed ETF carry a `no ETF` badge, and a **Tradeable only** filter on the
-Dashboard and Screener keeps just the ones you can act on.
+An exposure with no instrument is research, not a position, so strategy v1.0 never holds one:
+with `require_investable` on, only exposures whose mapped ETF or index fund had a price on the
+decision date are eligible. Elsewhere in the app, exposures without one carry a `no fund` badge,
+and a **Buyable only** filter on the Dashboard and Screener keeps just the ones you can act on.
 
 Two vehicle types are tracked separately, because they are bought differently. An **ETF** trades
 on exchange at a price that can sit above or below NAV. An **open-ended index fund** transacts
@@ -257,109 +303,47 @@ NSE publishes 139 live indices; the rotation universe is 47. A candidate must cl
 
 ## Backtest
 
-`src/quantitative/backtest.py` runs a monthly rotation test against Nifty 50.
+`src/quantitative/backtest.py` has no selection rules of its own. It calls `decision_chain` at
+every month-end close — the same chain as the dashboard — and does the accounting:
 
-- On the last trading day of each month the universe is ranked by composite momentum Z-score
-  using **only prices up to that day**, by calling the same `rank_exposures` the live dashboard
-  uses. There is no separate research implementation to drift out of sync.
-- The top *N* exposures (default 2) are held equally weighted until the next month end. A
-  month's return is therefore earned entirely after the decision that selected it.
-- An exposure is only selectable when every lookback it is scored on is fully populated at that
-  date, so a newly launched index is never ranked on 1-month momentum against names scored on
-  four horizons.
-- With the absolute-momentum filter on (classic dual momentum), an exposure whose own trailing
-  12-month return is negative is skipped and that slot goes to cash.
-- **Cash earns the risk-free rate**, 6.5% a year (`analytics.RISK_FREE_ANNUAL`, the same rate
-  the Sharpe and Sortino figures assume), accrued monthly on every slot left unfilled for any
-  reason. Indian liquid funds pay roughly that. Cash at 0% was not a conservative simplification:
-  the buyable + entry-rule variant spends about 40% of its slot-months in cash, so that one
-  assumption decided whether it beat Nifty 50.
-- **Only completed months count.** The current, unfinished month is not a rebalance date, so a
-  mid-month run never adds a short period that would then be annualised as a full one. CAGR is
-  annualised by the trading sessions actually covered.
-- **Turnover** is `0.5 × Σ|wₜ − wₜ₋₁|` over every holding and cash, so moving a slot into or out
-  of cash counts at its full size. The book starts in cash, so the first rebalance is 100%.
+- **Signal at t, fill at t+1.** A decision formed at the month-end close executes at the next
+  session's close (`execution_fill: t_plus_1_close`). The old portfolio earns the session in
+  between; each period runs from one fill to the next.
+- **Costs are charged.** `cost_bps_per_side` (25) on every unit of weight bought or sold, cash
+  legs excluded: `cost = bps × Σ|w − w_prior|`, deducted at the fill. The Backtest page reports
+  gross, costs and net.
+- **Cash earns the risk-free rate**, 6.5% a year (`risk_free_rate_annual`), the same rate as the
+  hurdle and the Sharpe ratio.
+- **Only completed months count.** The current, unfinished month is not a rebalance date, and
+  CAGR is annualised by the trading sessions actually covered.
+- **Turnover** is `0.5 × Σ|wₜ − wₜ₋₁|` over every holding and cash. The book starts in cash.
 - **Sharpe** is `(CAGR − rf) / annualised volatility`, the same definition as the exposure
   analytics.
-- Minimum window is 12 months; 24, 36 and 60 are also selectable.
 
-**Rolling windows.** A single headline number depends entirely on when the test started and
-stopped. Every overlapping 12-month window inside the record is compounded separately, and the
-distribution is the honest answer — the same treatment the Durability panel gives an exposure,
-applied to the strategy itself. Over 37 windows:
+**Two universes.** *Strategy (buyable)* is the portfolio the dashboard shows: a pick must have had
+a fund with a price on that date, judged from the vehicle's own history rather than today's
+lineup. *All indices* applies the same rules to every index whether or not a fund existed; it
+measures the signal, not a portfolio anyone could have held.
 
-| | Beat Nifty 50 | Median excess | Worst window |
-| --- | --- | --- | --- |
-| All indices | 100% | +34.4% | +3.0% |
-| Buyable + entry rule | **35%** | **−4.7%** | −20.1% |
+**Rolling windows and the early/recent split** are on the Backtest page. A single headline number
+depends on when the test started; the distribution of every 12-month window does not.
 
-How often it worked matters more than how much it made in the one window that happens to end
-today.
+**No figures are quoted here.** Earlier versions of this README carried hand-typed backtest
+numbers that went stale with every nightly refresh and every rule change. The Backtest page
+computes them from the current data and the current `strategy.json`.
 
-**Universe modes.** The backtest can run three ways, each stricter than the last:
+**What-if settings are not the strategy.** The page lets N, the buffer, the holding period, the
+window, the cost and the hurdle be changed, and runs six alternative score specifications on
+demand. Any setting that differs from `strategy.json` is labelled a what-if run. Choosing the
+best-looking one is fitting this sample.
 
-| Mode | What it measures | 60-month excess |
-| --- | --- | --- |
-| **All indices** | The signal — does momentum pick strong sectors? | **+237.3%** |
-| **Buyable only** | The portfolio — could you have owned it? | +26.2% |
-| **Buyable + entry rule** | What the app would have told you to do | **+1.1%** |
-
-Full universe ranks all 47 indices including ones with no buyable vehicle: it measures the
-*signal*, not a portfolio anyone could have held. Investable restricts each pick to exposures
-that had a fund you could actually have bought **on that date**, judged from the vehicle's own
-price history rather than the fact that it exists today — most of these ETFs and index funds
-launched in 2024–25, so treating them as available in 2021 would be look-ahead of the worst
-kind. Adding the BUY gate also demands the live entry rule. Where the top-ranked name fails a
-test the next is taken, down to a configurable rank (default 3); past that the slot goes to cash.
-
-Nearly all the apparent edge is in the gap between those rows. Read the last one.
-
-The universe can also be restricted to **sectors** or **themes** alone. They rotate on different
-cycles, and the combined universe is not the average of the two — over 60 months sectors alone
-returned −21.0% excess and themes −4.1%, against +1.1% for both together. Breadth itself helps.
-
-**Holding period** is selectable (1, 2, 3 or 6 months) and is separate from the history window.
-
-**Early versus recent.** The blended figure hides which half it came from, and here the halves
-disagree completely:
-
-| | Strategy | Nifty 50 | Excess | Periods with cash |
-| --- | --- | --- | --- | --- |
-| Sep 2022 – Dec 2024 | +19.2% | +36.3% | **−17.1%** | 86% |
-| Jan 2025 – Aug 2026 | +20.4% | +4.5% | **+15.9%** | 15% |
-
-Only 12 of 47 exposures had a fund in Aug 2021, against 34 today, so the early stretch mostly
-measures a market where sector funds barely existed rather than a failing signal. The recent
-stretch is 20 periods — far too few to call an edge. The page shows both.
-
-**Composite weights are configurable** in `data/universe/universe.json → momentum_weights`, and
-the pipeline applies them to the board and the backtest identically, so the two can never
-disagree about what "rank 1" means. The default is equal weight across 1M/3M/6M/12M: a neutral
-prior that assumes nothing about which horizon predicts best, which is the honest default when
-the record is this short.
-
-**Do not tune them on this sample.** Running the same 48 months under six reasonable weightings
-moves the excess return by roughly 30 percentage points — a swing that comes from the parameter,
-not the strategy. Picking the best row is fitting noise. The Backtest page runs that grid on
-demand so the fragility is visible rather than hidden.
-
-**The history window is not the return window.** The ranking needs a full 12-month history
-before it can pick anything, so a 60-month window yields 48 months of returns; the opening year
-is warm-up. The page states both, and every statistic is measured over the months that actually
-produced a holding.
-
-**Ranking versus the absolute filter.** The rank is a composite Z across 1M/3M/6M/12M; the
-absolute-momentum filter uses 12M alone. That difference is what lets the filter bite — ranking
-on *relative* return and filtering on *absolute* over the same window can never disagree, since
-both subtract the same benchmark. `test_absolute_filter_rejects_a_composite_winner_with_negative_12m`
-pins the case where the composite leader is down over 12 months and is correctly passed over.
-
-**Limits, stated plainly.** Transaction costs are deliberately zero — no brokerage, spread,
-STT, expense ratio, tracking error or tax — so a real book earns less, and more so at higher
-turnover. These are index levels, and an index cannot be bought directly.
-The eligible universe grows over time as newer indices reach a full 12-month history. Index
-reconstitution is embedded in the published series. A 12-month sample cannot distinguish skill
-from luck; treat it as a sanity check on the signal, not as evidence of an edge.
+**Limits, stated plainly.** v1.0 was specified after studying these same four years, so the
+backtest is point-in-time but not out-of-sample. 25 bps per side covers brokerage and spread only
+roughly; tax, ETF premium to NAV and impact on thin funds are not modelled. These are index
+levels, and an index cannot be bought directly; a fund lags by its tracking difference. Index
+reconstitution is embedded in the published series, and funds that launched and later closed are
+absent. Several thematic indices were launched with back-calculated history, and the universe was
+chosen in 2026. Treat the record as a check on the rules, not as evidence of an edge.
 
 ## Prepared data contract
 
@@ -367,12 +351,15 @@ from luck; treat it as a sanity check on the signal, not as evidence of an edge.
 
 | File | Contents |
 | --- | --- |
-| `summary_rankings.parquet` | One row per exposure: stage, RS ratio/momentum, momentum Z, rank, returns, `data_source`, `value_type` |
+| `summary_rankings.parquet` | One row per exposure: stage, RS ratio/momentum, returns, `data_source`, `value_type`, and `momentum_z` / `rank` — the strategy score and its rank across the universe as of the latest session |
 | `rs_matrix.parquet` | Weekly Mansfield RS per exposure |
 | `index_prices.parquet` | Daily canonical index levels per exposure plus the Nifty 50 benchmark in `__benchmark__` — required by the Backtest page |
 | `etf_universe.parquet` | ETF metadata per exposure |
 | `etf_prices.parquet` | Daily ETF price/NAV history |
-| `metadata.json` | Coverage, provenance, value types, validation warnings, quality alerts |
+| `metadata.json` | Coverage, provenance, value types (including `benchmark_value_type`), fetch errors, validation warnings, quality alerts, and the `strategy` config with its `strategy_version` and `strategy_hash` |
+
+The target portfolio is not stored: the app and the alert tool build it from these files with
+`src/portfolio`, so it can never disagree with the code that tested it.
 
 If `index_prices.parquet` is absent the Backtest page explains what is missing and the rest of
 the app is unaffected.
@@ -404,18 +391,24 @@ hard-coded key list that omitted the adapter serving every exposure, so Data Hea
 zero canonical sources while 43 were present.
 
 ETF coverage moves run to run as Yahoo and MFAPI availability changes; INFRABEES, previously the
-standing gap, now resolves via MFAPI. Any shortfall here is an ingestion gap in the
-implementation layer only — the canonical index history behind every decision is unaffected, and
-no signal depends on it. The Data Health page lists whatever is currently skipped.
+standing gap, now resolves via MFAPI. The Data Health page lists whatever is currently skipped.
+
+**Fund histories now feed decisions.** Eligibility is judged from each vehicle's own price
+history, so a fund whose history drops out of a night's fetch can make its exposure ineligible —
+and a holding ineligible is sold. Eleven of the 34 buyable exposures currently rely on a single
+fund's history. Until launch dates are recorded independently of the nightly fetch, an
+`etf_valid_series` regression in `quality_alerts` deserves a look before acting on a SELL.
 
 ## Alerts
 
-A rotation model only asks for action when something changes, so watching the board daily is the
-wrong use of a person. After each pipeline run `tools/detect_alerts.py` compares the new decision
-set against the last committed one and reports exposures entering or leaving BUY / REDUCE. The
-workflow opens a GitHub issue when anything changed, which reaches watchers by email and on
-mobile without needing any additional secret. Drift between two WATCH states is recorded but
-never raised — only entering or leaving an actionable state interrupts anyone.
+A rotation model only asks for action when its target changes, and the v1.0 target only changes
+at a month-end rebalance. After each pipeline run `tools/detect_alerts.py` builds the target
+portfolio from tonight's data and from the last committed data — with `src/portfolio`, the same
+code as the dashboard — and reports the orders between them: buys, sells and resizes, with
+weights, ranks and reasons. The workflow opens a GitHub issue when anything changed, which reaches
+watchers by email and on mobile without needing any additional secret. Between rebalances both
+nights produce the same decision and nothing is raised. The tool imports nothing from the
+Streamlit app.
 
 ## Local setup
 
