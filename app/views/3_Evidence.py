@@ -17,7 +17,7 @@ from app.components.charts import (  # noqa: E402
     monthly_excess,
     rolling_excess,
 )
-from app.components.tables import tinted  # noqa: E402
+from app.components.tables import show_table, tinted  # noqa: E402
 from app.components.theme import fmt_pct, kpi_grid, note, page_header, section, tone_of  # noqa: E402
 from app.data import (  # noqa: E402
     EVALUATION_OPTIONS,
@@ -158,7 +158,7 @@ if other.ok:
         ]
     )
     section("With and without back-calculated history", "Same rules; only pre-launch eligibility differs")
-    st.dataframe(
+    show_table(
         tinted(comparison, ["Net excess vs Nifty"], cap=0.4),
         hide_index=True,
         width="stretch",
@@ -201,7 +201,7 @@ if not split.empty:
         columns={"periods": "Periods", "strategy": "Strategy (net)", "benchmark": "Nifty 50 TRI",
                  "excess": "Excess", "cash_periods": "Periods with cash"}
     )
-    st.dataframe(
+    show_table(
         tinted(halves, ["Excess"], cap=0.3),
         hide_index=True,
         width="stretch",
@@ -213,7 +213,7 @@ with st.expander("Month-by-month record", expanded=False):
     ledger = _named(result.monthly)
     st.plotly_chart(monthly_excess(ledger), width="stretch", config=CHART_CONFIG)
     ledger["Month"] = pd.to_datetime(ledger["period_end"]).dt.strftime("%b %Y")
-    st.dataframe(
+    show_table(
         ledger[["Month", "holdings", "cash_slots", "turnover", "cost", "strategy_return", "benchmark_return",
                 "excess_return", "universe", "skipped"]].rename(
             columns={"holdings": "Held", "cash_slots": "Cash", "turnover": "Turnover", "cost": "Cost",
@@ -284,7 +284,7 @@ with st.expander("Parameter Sensitivity (Unvalidated)", expanded=False):
         if grid.empty:
             note("Not enough history to test alternative score specifications.")
         else:
-            st.dataframe(
+            show_table(
                 grid.rename(columns={"weighting": "Score specification", "total_return": "Net total",
                                      "excess": "Net excess", "max_drawdown": "Max DD", "hit_rate": "Hit rate",
                                      "turnover": "Turnover"}),

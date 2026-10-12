@@ -392,3 +392,33 @@ def current_regime():
     if benchmark.empty:
         return None
     return market_regime(benchmark, load_cash_nav(), strategy_config().risk_free_rate_annual)
+
+
+@st.cache_data(show_spinner="Replaying the model book…")
+def _model_book(modified_ns: int = 0):
+    """The live rules' decision chain, bought and held in the funds the vehicle rule picks."""
+    del modified_ns
+    from src.portfolio.book import MODEL_BOOK_CAPITAL, build_model_book
+    from src.portfolio.vehicles import choose_vehicle
+
+    config = strategy_config()
+    result = load_backtest(config)
+    panel, benchmark = load_index_panel()
+    frame = _vehicle_frame(_stamp("etf_universe.parquet"))
+    return build_model_book(
+        result.decisions,
+        panel,
+        benchmark,
+        load_etf_prices(),
+        lambda exposure_id, as_of: choose_vehicle(exposure_id, as_of, frame, vehicle_tracking(exposure_id)),
+        MODEL_BOOK_CAPITAL,
+        float(config.cost_bps_per_side),
+        load_cash_nav(),
+        float(config.risk_free_rate_annual),
+        _names(),
+    )
+
+
+def load_model_book():
+    return _model_book(_stamp("index_prices.parquet", "etf_prices.parquet", "etf_universe.parquet",
+                              "cash_nav.parquet", "summary_rankings.parquet"))

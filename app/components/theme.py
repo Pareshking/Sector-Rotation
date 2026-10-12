@@ -9,15 +9,15 @@ full-width block on a phone, while a grid with ``auto-fit`` keeps two cards to
 a row and emits one DOM write instead of dozens of widgets. Long tables stay
 ``st.dataframe``, which already sorts, scrolls and keeps its header sticky.
 
-Colours come in two token sets selected from ``st.context.theme``; the native
-widgets follow the matching ``[theme.light]`` / ``[theme.dark]`` blocks in
-``.streamlit/config.toml``.
+Colours are one light token set, "Clear Ledger" (the Paresh app's design); the
+native widgets follow the same values in ``.streamlit/config.toml``.
 """
 
 from __future__ import annotations
 
 import html
-from typing import Iterable, Sequence
+from contextlib import contextmanager
+from typing import Iterable, Iterator, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -28,29 +28,20 @@ import streamlit as st
 # Semantic roles, not hues: "pos" is outperformance / risk-on (emerald), "neg"
 # is drawdown / risk-off (crimson), "accent" is the active selection (indigo),
 # "info" is neutral information (sky), "warn" asks for attention (amber).
+# "Clear Ledger", the light design of the Paresh app, and the only theme: a
+# white, quiet page where colour is kept for what it means (owner, 12 Oct 2026).
+# "bg" is the page, "surface" a card on it.
 LIGHT = {
-    "bg": "#FFFFFF", "surface": "#F8FAFC", "surface2": "#F1F5F9",
-    "line": "#E2E8F0", "line2": "#CBD5E1",
-    "text": "#0F172A", "text2": "#334155", "muted": "#64748B", "faint": "#94A3B8",
-    "pos": "#047857", "pos_bg": "#ECFDF5", "pos_line": "#A7F3D0",
-    "neg": "#BE123C", "neg_bg": "#FFF1F2", "neg_line": "#FECDD3",
-    "warn": "#B45309", "warn_bg": "#FFFBEB", "warn_line": "#FDE68A",
-    "accent": "#4338CA", "accent_bg": "#EEF2FF", "accent_line": "#C7D2FE",
-    "info": "#0369A1", "info_bg": "#F0F9FF", "info_line": "#BAE6FD",
-    "shadow": "0 1px 2px rgba(15,23,42,.05), 0 1px 3px rgba(15,23,42,.04)",
-    "header_bg": "rgba(255,255,255,.86)",
-}
-DARK = {
-    "bg": "#0A0A0B", "surface": "#131316", "surface2": "#1C1C21",
-    "line": "#27272A", "line2": "#3F3F46",
-    "text": "#F4F4F5", "text2": "#D4D4D8", "muted": "#A1A1AA", "faint": "#71717A",
-    "pos": "#34D399", "pos_bg": "rgba(16,185,129,.12)", "pos_line": "rgba(52,211,153,.32)",
-    "neg": "#FB7185", "neg_bg": "rgba(244,63,94,.12)", "neg_line": "rgba(251,113,133,.32)",
-    "warn": "#FBBF24", "warn_bg": "rgba(245,158,11,.12)", "warn_line": "rgba(251,191,36,.32)",
-    "accent": "#A5B4FC", "accent_bg": "rgba(99,102,241,.16)", "accent_line": "rgba(165,180,252,.34)",
-    "info": "#7DD3FC", "info_bg": "rgba(14,165,233,.12)", "info_line": "rgba(125,211,252,.32)",
-    "shadow": "0 1px 2px rgba(0,0,0,.4)",
-    "header_bg": "rgba(10,10,11,.84)",
+    "bg": "#F6F7F9", "surface": "#FFFFFF", "surface2": "#F4F5F8",
+    "line": "#E3E6EB", "line2": "#D0D5DD",
+    "text": "#0E1726", "text2": "#3C4657", "muted": "#5E6878", "faint": "#98A1AE",
+    "pos": "#067647", "pos_bg": "#E8F5EE", "pos_line": "#B7E0C8",
+    "neg": "#B42318", "neg_bg": "#FDEDEB", "neg_line": "#F5C2BC",
+    "warn": "#B54708", "warn_bg": "#FEF6EA", "warn_line": "#F7D7A8",
+    "accent": "#4F46E5", "accent_bg": "#EEF0FF", "accent_line": "#C9CCFB",
+    "info": "#0369A1", "info_bg": "#EFF7FC", "info_line": "#BFDDF0",
+    "shadow": "0 1px 2px rgba(14,23,38,.04)",
+    "header_bg": "rgba(255,255,255,.92)",
 }
 
 TONES = ("pos", "neg", "warn", "accent", "info")
@@ -72,16 +63,9 @@ ACTION_CLASS = ACTION_TONE
 STAGE_TONE = {"Leading": "pos", "Weakening": "warn", "Lagging": "neg", "Improving": "info"}
 
 
-def is_dark() -> bool:
-    try:
-        return getattr(st.context.theme, "type", None) == "dark"
-    except Exception:  # noqa: BLE001 - no browser context (bare mode, tests)
-        return False
-
-
 def palette() -> dict[str, str]:
-    """The active token set, for charts and inline colours."""
-    return DARK if is_dark() else LIGHT
+    """The token set, for charts and inline colours. Light only."""
+    return LIGHT
 
 
 def stage_colors() -> dict[str, str]:
@@ -106,7 +90,8 @@ _CSS = """
 /* --- clean defaults: no decoration bar, no dead space above the first line --- */
 [data-testid="stDecoration"]{display:none}
 [data-testid="stHeader"]{background:var(--header-bg);backdrop-filter:saturate(180%%) blur(10px);border-bottom:1px solid var(--line)}
-[data-testid="stMainBlockContainer"]{max-width:1360px;padding-top:calc(var(--nav-h) + .75rem);padding-bottom:4rem}
+/* Full width of layout="wide", as the Paresh app does; a fixed cap left wide screens two empty bands. */
+[data-testid="stMainBlockContainer"]{max-width:100%%;padding:calc(var(--nav-h) + .75rem) 1.5rem 4rem}
 h1,h2,h3,h4{letter-spacing:-.025em;color:var(--text)}
 h1{font-size:1.9rem!important;line-height:1.08!important;margin:0!important;padding:0!important}
 .stMarkdown p,.stMarkdown li{font-size:.9rem;line-height:1.62}
@@ -147,6 +132,32 @@ background:var(--surface2);color:var(--text2);font-size:.66rem;font-weight:750;l
 .ds-kpi-l{color:var(--muted);font-size:.64rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;line-height:1.25}
 .ds-kpi-v{font-size:1.55rem;font-weight:750;letter-spacing:-.03em;line-height:1.15;margin-top:5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ds-kpi-n{color:var(--muted);font-size:.74rem;margin-top:4px;line-height:1.4}
+
+/* --- readings: one bordered row of centred figures; only the value carries colour --- */
+.ds-reads{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--line);border-radius:var(--r);
+background:var(--surface);box-shadow:var(--shadow);overflow:hidden;margin:.4rem 0 .9rem}
+.ds-read{padding:16px 12px;text-align:center;border-right:1px solid var(--line);min-width:0}
+.ds-read:last-child{border-right:0}
+.ds-read-l{font-size:.78rem;color:var(--muted);font-weight:600}
+.ds-read-v{font-size:1.6rem;font-weight:750;letter-spacing:-.03em;line-height:1.2;margin-top:4px;white-space:nowrap;color:var(--text)}
+.ds-read-v.up{color:var(--pos)}.ds-read-v.down{color:var(--neg)}.ds-read-v.warn{color:var(--warn)}
+.ds-read-n{font-size:.74rem;color:var(--muted);margin-top:3px}
+.ds-cardhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 4px}
+.ds-cardhead b{font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--text)}
+.ds-cardhead span{font-size:.78rem;color:var(--muted);text-align:right}
+.ds-bars{display:grid;grid-template-columns:minmax(150px,1.2fr) 3fr auto;gap:9px 14px;align-items:center;font-size:.82rem}
+.ds-bars .t{height:8px;border-radius:4px;background:var(--surface2);overflow:hidden}
+.ds-bars .t i{display:block;height:100%%;background:var(--accent);border-radius:4px}
+.ds-bars .t i.cash{background:var(--info)}
+.ds-bars .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--text2);font-weight:600}
+.ds-calw{overflow-x:auto}
+.ds-cal{width:100%%;border-collapse:collapse;font-size:.78rem;font-variant-numeric:tabular-nums}
+.ds-cal th{color:var(--muted);font-weight:650;text-align:right;padding:6px 8px;border-bottom:1px solid var(--line)}
+.ds-cal td{padding:5px 8px;text-align:right;border-bottom:1px solid var(--line);color:var(--text)}
+.ds-cal th:first-child,.ds-cal td:first-child,.ds-cal th:nth-child(2),.ds-cal td:nth-child(2){text-align:left}
+.ds-cal td.s{color:var(--muted);font-size:.72rem}
+.ds-cal td.yr{font-weight:700}
+.ds-cal tr.first td{border-top:1px solid var(--line2)}
 
 /* --- status bar (hero) --- */
 .ds-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--line);border-left:4px solid var(--accent);
@@ -424,3 +435,66 @@ def steps(items: Sequence[tuple[str, str]]) -> None:
             for i, (title, body) in enumerate(items, start=1)
         )
     )
+
+
+def readings(items: Sequence[tuple[str, str, str, str]]) -> None:
+    """A row of centred figures. items: (label, value, note, direction); direction is up, down, warn or ''."""
+    cells = "".join(
+        f'<div class="ds-read"><div class="ds-read-l">{_esc(label)}</div>'
+        f'<div class="ds-read-v {direction if direction in ("up", "down", "warn") else ""}">{_esc(value)}</div>'
+        + (f'<div class="ds-read-n">{_esc(sub)}</div>' if sub else "") + "</div>"
+        for label, value, sub, direction in items
+    )
+    html_block(f'<div class="ds-reads">{cells}</div>')
+
+
+@contextmanager
+def card(title: str, aside: str = "") -> Iterator[None]:
+    """A bordered container with a title, and a short figure or count on the right."""
+    with st.container(border=True):
+        html_block(f'<div class="ds-cardhead"><b>{_esc(title)}</b><span>{_esc(aside)}</span></div>')
+        yield
+
+
+def bar_list(rows: Sequence[tuple[str, float, str, bool]], scale: float | None = None) -> str:
+    """Horizontal bars: (label, value, shown value, is_cash). ``scale`` is the full-width value."""
+    top = scale or max((float(r[1]) for r in rows), default=1.0) or 1.0
+    body = "".join(
+        f'<span>{_esc(label)}</span><span class="t"><i class="{"cash" if is_cash else ""}" '
+        f'style="width:{max(min(float(value) / top, 1.0), 0.0) * 100:.1f}%%"></i></span><span class="v">{_esc(shown)}</span>'
+        for label, value, shown, is_cash in rows
+    ).replace("%%", "%")
+    return f'<div class="ds-bars">{body}</div>'
+
+
+def _cell_tint(value: float, cap: float = 0.08) -> str:
+    if value != value or value == 0:
+        return ""
+    alpha = 0.08 + 0.32 * min(abs(value) / cap, 1.0)
+    rgb = "16,185,129" if value > 0 else "244,63,94"
+    return f' style="background:rgba({rgb},{alpha:.3f})"'
+
+
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def calendar_html(grids: Sequence[tuple[str, pd.DataFrame]]) -> str:
+    """Years down, months across, one row per series (e.g. Strategy, Nifty 50, Alpha) within each year."""
+    years = sorted({int(y) for _, grid in grids for y in grid.index}, reverse=True)
+    head = "<tr><th>Year</th><th></th>" + "".join(f"<th>{m}</th>" for m in MONTHS) + "<th>Year</th></tr>"
+    rows = []
+    for year in years:
+        for i, (name, grid) in enumerate(grids):
+            if year not in grid.index:
+                continue
+            row = grid.loc[year]
+            cells = []
+            for month in [*MONTHS, "Year"]:
+                value = row.get(month)
+                value = float(value) if value is not None and pd.notna(value) else float("nan")
+                text = "" if value != value else f"{value:+.1%}"
+                cls = ' class="yr"' if month == "Year" else ""
+                cells.append(f"<td{cls}{_cell_tint(value, 0.25 if month == 'Year' else 0.08)}>{text}</td>")
+            rows.append(f'<tr class="{"first" if i == 0 else ""}"><td>{year if i == 0 else ""}</td>'
+                        f'<td class="s">{_esc(name)}</td>{"".join(cells)}</tr>')
+    return f'<div class="ds-calw"><table class="ds-cal"><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>'

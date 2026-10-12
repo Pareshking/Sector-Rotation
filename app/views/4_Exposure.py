@@ -18,6 +18,7 @@ from app.components.charts import (  # noqa: E402
     trailing_volatility,
 )
 from app.components.metrics import HELD_ACTIONS, source_label  # noqa: E402
+from app.components.tables import show_table  # noqa: E402
 from app.components.theme import (  # noqa: E402
     STAGE_TONE,
     _esc,
@@ -194,7 +195,7 @@ else:
             "Prem/disc %": pd.to_numeric(vehicles["premium_discount_pct"], errors="coerce"),
         }
     ).sort_values(["Best", "Tracking diff"], ascending=[False, False], na_position="last", kind="mergesort")
-    st.dataframe(
+    show_table(
         matrix,
         hide_index=True,
         width="stretch",
@@ -259,7 +260,7 @@ else:
              "index funds fill at the next NAV", "pos" if fastest == 1 else "warn"),
         ]
     )
-    st.dataframe(
+    show_table(
         sizing,
         hide_index=True,
         width="stretch",

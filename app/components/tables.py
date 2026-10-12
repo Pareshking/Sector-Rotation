@@ -6,9 +6,10 @@ help text consistent across them, and renders the full model-input audit.
 
 from __future__ import annotations
 
-
 import pandas as pd
 import streamlit as st
+
+DASH = "—"
 
 
 
@@ -118,6 +119,62 @@ def tinted(frame: pd.DataFrame, columns, cap: float = 0.25):
     return frame.style.map(lambda v: _tint(v, cap), subset=present)
 
 
+def _compact(value: float) -> str:
+    """Rupee amounts the Indian way: lakh and crore."""
+    size = abs(value)
+    if size >= 1e7:
+        return f"{value / 1e7:,.2f} Cr"
+    if size >= 1e5:
+        return f"{value / 1e5:,.2f} L"
+    return f"{value:,.0f}"
+
+
+def _formatter(config: dict | None):
+    kind = ((config or {}).get("type_config") or {}).get("type")
+    fmt = ((config or {}).get("type_config") or {}).get("format")
+    if kind in {"date", "datetime"}:
+        return lambda v: pd.Timestamp(v).strftime("%d %b %Y")
+    if fmt == "percent":
+        return lambda v: f"{float(v):.2%}"
+    if fmt == "compact":
+        return lambda v: _compact(float(v))
+    if isinstance(fmt, str) and "%" in fmt:
+        return lambda v: fmt % float(v)
+    return lambda v: f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def dashed(frame: pd.DataFrame, config: dict) -> tuple[pd.DataFrame, dict]:
+    """Show a missing value as a dash rather than Streamlit's grey "None".
+
+    ``st.dataframe`` has no setting for how it draws an empty cell, so only the
+    columns that actually have a gap are turned into right-aligned text, in the
+    format their column config already asks for. Those columns then sort as
+    text; every column without a gap keeps its numeric sort.
+    """
+    out, config = frame.copy(), dict(config)
+    for column in out.columns:
+        if not out[column].isna().any():
+            continue
+        current = config.get(column) or {}
+        kind = (current.get("type_config") or {}).get("type")
+        if kind in {"progress", "checkbox", "line_chart", "bar_chart", "area_chart"}:
+            continue
+        show = _formatter(current)
+        out[column] = [DASH if pd.isna(v) else show(v) for v in out[column]]
+        config[column] = st.column_config.TextColumn(
+            current.get("label"), width=current.get("width"), help=current.get("help"),
+            pinned=current.get("pinned"), alignment="left" if kind == "text" else "right",
+        )
+    return out, config
+
+
+def show_table(data, column_config: dict | None = None, **kwargs):
+    """``st.dataframe`` with missing values shown as a dash (see ``dashed``)."""
+    if isinstance(data, pd.DataFrame):
+        data, column_config = dashed(data, column_config or {})
+    return st.dataframe(data, column_config=column_config, **kwargs)
+
+
 def audit_frame(frame: pd.DataFrame, key: str | None = None, height: int = 420) -> None:
     """Raw model inputs, in the same vocabulary as every other table."""
     if frame is None or frame.empty:
@@ -125,7 +182,7 @@ def audit_frame(frame: pd.DataFrame, key: str | None = None, height: int = 420) 
         return
     known = [c for c in COLUMNS if c in frame.columns]
     rest = [c for c in frame.columns if c not in known]
-    st.dataframe(
+    show_table(
         frame[known + rest],
         column_config=column_config(known),
         hide_index=True,

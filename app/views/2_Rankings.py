@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.charts import CHART_CONFIG, rrg_scatter  # noqa: E402
 from app.components.metrics import HELD_ACTIONS  # noqa: E402
-from app.components.tables import audit_frame, tinted  # noqa: E402
+from app.components.tables import audit_frame, show_table, tinted  # noqa: E402
 from app.components.theme import (  # noqa: E402
     STAGE_TONE,
     chip,
@@ -92,7 +92,7 @@ table = pd.DataFrame(
 ).sort_values("Rank", na_position="last", kind="mergesort").reset_index(drop=True)
 
 section(f"{len(table)} exposures", "Sorted by score · click a header to re-sort · the header stays in view while you scroll")
-st.dataframe(
+show_table(
     tinted(table, periods, cap=0.30 if absolute else 0.20),
     hide_index=True,
     width="stretch",

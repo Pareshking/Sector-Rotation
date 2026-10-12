@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from app.components.explain import score_breakdown  # noqa: E402
 from app.components.metrics import get_metadata, health_summary  # noqa: E402
+from app.components.tables import show_table  # noqa: E402
 from app.components.theme import _esc, kpi_grid, note, page_header, section, steps  # noqa: E402
 from app.data import load_decisions, load_portfolio, strategy_config  # noqa: E402
 from src.config import SEGMENTS  # noqa: E402
@@ -50,7 +51,7 @@ st.markdown(
     "from *t*:"
 )
 st.latex(r"r^{(a,b)}_{i,t} \;=\; \ln P_{i,\,t-a} \;-\; \ln P_{i,\,t-b}")
-st.dataframe(
+show_table(
     pd.DataFrame(
         {
             "Segment": list(SEGMENTS),
@@ -122,7 +123,7 @@ else:
         f"At the **{target.as_of:%d %b %Y}** close, {int(ranking['valid'].sum())} exposures had a full year of history "
         f"and {int(ranking['eligible'].sum())} were eligible. Take **{_esc(name)}**:"
     )
-    st.dataframe(
+    show_table(
         breakdown,
         hide_index=True,
         width="stretch",

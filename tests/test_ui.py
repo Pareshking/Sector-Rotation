@@ -134,35 +134,37 @@ def test_the_shell_renders_the_status_header_above_the_default_page():
     text = " ".join(_text(m.value) for m in at.markdown)
     assert len(re.findall(r"Dual Momentum RISK-(?:ON|OFF) ", text)) == 1, "one regime chip in the header"
     assert "As of" in text and "Strategy v" in text and re.search(r"Data (fresh|stale)", text)
-    assert "What to hold, what to trade" in text, "the default page runs beneath the header"
+    assert "Portfolio value" in text, "the default page runs beneath the header"
 
 
 @needs_data
-def test_the_portfolio_page_answers_the_five_second_questions():
+def test_the_portfolio_page_is_the_model_book_dashboard():
+    """Six readings, then the Paresh layout: book, mix, co-movement, equity, calendar, record, trades, rebalances."""
     at = _render("1_Portfolio.py")
+    assert not at.exception, [e.message for e in at.exception]
     text = " ".join(_text(m.value) for m in at.markdown)
-    assert "Next rebalance" in text and "strategy v" in text
-    assert "Holdings steady until Next Rebalance" in text or "Rebalance at the" in text
-    for heading in ("Target allocation", "Trade execution log", "On the edge"):
-        assert heading in text, heading
-    table = at.dataframe[0].value
-    assert list(table.columns) == [
-        "Exposure", "Best vehicle", "Target", "Held now", "Action", "Est. cost (bps of book)", "Days to build"
-    ]
-    assert table["Exposure"].iloc[-1] == "Cash"
-    assert abs(table["Target"].sum() - 1.0) < 1e-9
-    assert set(table["Action"]) <= {"BUY", "HOLD", "TRIM", "SELL", "—"}
-    # The front page carries no RRG chart, no action board and no raw dump.
-    assert not at.get("plotly_chart")
-    assert "Leading" not in text and "Action board" not in text and "Model inputs" not in text
+    for reading in ("Portfolio value", "Since inception", "Unrealised P&L", "Day P&L", "Cash / realised balance"):
+        assert reading in text, reading
+    assert "Invested: ₹20,00,000" in text
+    for card in ("Current book", "Exposure mix", "Equity & drawdown", "Calendar returns", "Monthly record",
+                 "Trades", "Rebalances"):
+        assert card in text, card
+    assert [p.options for p in at.get("button_group")][:2] == [["All", "Winners", "Losers", "Open"],
+                                                                ["All", "Buy", "Sell", "Hold"]]
 
 
 @needs_data
-def test_portfolio_reasons_are_escaped_not_parsed_as_html():
-    """A reason contains 'rank <= 4'; rendered raw, '<=' swallowed the rest of the line."""
-    at = _render("1_Portfolio.py")
-    why = [m.value for m in at.markdown if "Retained inside the buffer" in m.value or "New entry" in m.value]
-    assert why and all("&lt;=" in v and "(rank cash" not in v for v in why)
+def test_ledger_tables_escape_reasons_and_dash_gaps():
+    """A reason contains 'rank <= 4'; unescaped, '<=' would swallow the rest of the cell."""
+    import pandas as pd
+
+    from app.components.ledger import Col, table_html
+
+    frame = pd.DataFrame({"Why": ["rank <= 4 & held"], "Return %": [float("nan")], "Units": [12.0]})
+    markup, _ = table_html(frame, [Col("Why"), Col("Return %", "pct"), Col("Units", "units")])
+    assert "rank &lt;= 4 &amp; held" in markup
+    assert '<td class="c mute" data-v="">—</td>' in markup
+    assert ">12</td>" in markup
 
 
 @needs_data

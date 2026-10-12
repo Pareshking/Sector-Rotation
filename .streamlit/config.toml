@@ -1,40 +1,24 @@
-# Native widgets follow the same palette as app/components/theme.py, in both
-# themes; the viewer's system setting picks one unless they choose in the menu.
+# "Clear Ledger": the light design of the Paresh app, and the only theme. The
+# same tokens are repeated as CSS variables in app/components/theme.py.
 [theme]
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
-codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap, monospace"
-baseFontSize = 15
-baseRadius = "0.6rem"
-showWidgetBorder = true
-headingFontWeights = [750, 700, 650, 650, 600, 600]
-
-[theme.light]
-primaryColor = "#4338CA"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F8FAFC"
-textColor = "#0F172A"
-borderColor = "#E2E8F0"
-dataframeBorderColor = "#E2E8F0"
-dataframeHeaderBackgroundColor = "#F1F5F9"
+base = "light"
+primaryColor = "#4F46E5"
+backgroundColor = "#F6F7F9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0E1726"
 linkColor = "#4338CA"
-greenColor = "#047857"
-redColor = "#BE123C"
-blueColor = "#0369A1"
-chartCategoricalColors = ["#4338CA", "#047857", "#B45309", "#0369A1", "#BE123C", "#7C3AED"]
-
-[theme.dark]
-primaryColor = "#818CF8"
-backgroundColor = "#0A0A0B"
-secondaryBackgroundColor = "#131316"
-textColor = "#F4F4F5"
-borderColor = "#27272A"
-dataframeBorderColor = "#27272A"
-dataframeHeaderBackgroundColor = "#18181B"
-linkColor = "#A5B4FC"
-greenColor = "#34D399"
-redColor = "#FB7185"
-blueColor = "#7DD3FC"
-chartCategoricalColors = ["#818CF8", "#34D399", "#FBBF24", "#7DD3FC", "#FB7185", "#C4B5FD"]
+linkUnderline = false
+borderColor = "#D0D5DD"
+showWidgetBorder = true
+baseRadius = "10px"
+greenColor = "#067647"
+redColor = "#B42318"
+orangeColor = "#B54708"
+dataframeHeaderBackgroundColor = "#F4F5F8"
+font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap, sans-serif"
+headingFont = "'Bricolage Grotesque':https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&display=swap, sans-serif"
+codeFont = "'Geist Mono':https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400..700&display=swap, monospace"
+chartCategoricalColors = ["#4F46E5", "#067647", "#B54708", "#0369A1", "#B42318", "#7C3AED"]
 
 [server]
 headless = true
