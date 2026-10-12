@@ -27,7 +27,14 @@ from src.data.ingest import (
     restatements,
     update_index,
 )
-from src.data.nse_etf import fetch_etf_snapshot, merge_snapshot
+from src.data.nse_etf import (
+    COLUMNS as SNAPSHOT_COLUMNS,
+    SnapshotResolution,
+    fetch_etf_snapshot,
+    load_last_snapshot,
+    merge_snapshot,
+    resolve_snapshot,
+)
 from src.data.store import DEFAULT_OVERLAP_SESSIONS, RawStore
 from src.portfolio.live import live_portfolio, target_frame
 from src.portfolio.score import score_exposures
@@ -55,6 +62,8 @@ OUTPUT = ROOT / "data" / "processed"
 # The append-only archive. Committed by the nightly workflow alongside
 # data/processed, so each run extends it instead of starting again.
 STORE_ROOT = ROOT / "data" / "raw"
+# The last snapshot NSE actually served, kept so a refused fetch carries it forward.
+SNAPSHOT_PATH = STORE_ROOT / "snapshot" / "nse_etf.parquet"
 
 MIN_DECISION_OBSERVATIONS = 250
 MIN_PROMOTION_OBSERVATIONS = 60
@@ -486,8 +495,23 @@ def run(
     summary = summary.sort_values("rank", na_position="last", kind="mergesort")
     # Liquidity and premium/discount decide whether a signal is actually
     # actionable. Best-effort: a snapshot failure must not fail a run that
-    # already produced valid index history.
-    etfs = merge_snapshot(etfs, fetch_etf_snapshot() if mode == "live" else None)
+    # already produced valid index history. NSE intermittently refuses GitHub's
+    # runners, so a refused fetch carries the last good snapshot forward
+    # rather than publishing blanks over it.
+    if mode == "live":
+        _stage("Fetching the NSE ETF snapshot...")
+        fresh, snapshot_error = fetch_etf_snapshot()
+        snapshot = resolve_snapshot(fresh, snapshot_error, load_last_snapshot(SNAPSHOT_PATH))
+        if snapshot.status != "fresh":
+            _stage(f"NSE ETF snapshot {snapshot.status}: {snapshot.error}")
+    else:
+        snapshot = SnapshotResolution(pd.DataFrame(columns=SNAPSHOT_COLUMNS), "skipped", None)
+    etfs = merge_snapshot(etfs, snapshot.snapshot)
+    is_etf = etfs["vehicle"].eq("etf") if "vehicle" in etfs else pd.Series(True, index=etfs.index)
+    snapshot_report = snapshot.report(
+        matched=int(pd.to_numeric(etfs.loc[is_etf, "traded_value"], errors="coerce").notna().sum()),
+        total=int(is_etf.sum()),
+    )
 
     # The canonical price panel is what makes an out-of-sample backtest possible.
     index_panel = prices.copy()
@@ -518,6 +542,7 @@ def run(
         "validation_warnings": list(report.warnings) + etf_problems,
         "inception_conflicts": inception_conflicts(registry, etf_history),
         "cash_proxy": _cash_info(strategy, cash, cash_report),
+        "etf_snapshot": snapshot_report,
         "target_portfolio": {
             "as_of": f"{live.target.as_of:%Y-%m-%d}",
             "next_rebalance": f"{live.next_rebalance:%Y-%m-%d}",
@@ -555,6 +580,8 @@ def run(
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")
     write_parquet(pd.DataFrame(rs_series).sort_index(), OUTPUT / "rs_matrix.parquet")
     write_parquet(etfs, OUTPUT / "etf_universe.parquet")
+    if snapshot.status == "fresh":
+        write_parquet(snapshot.snapshot.reset_index(drop=True), SNAPSHOT_PATH)
     write_parquet(etf_history, OUTPUT / "etf_prices.parquet")
     write_parquet(index_panel, OUTPUT / "index_prices.parquet")
     write_parquet(cash_frame, OUTPUT / "cash_nav.parquet")

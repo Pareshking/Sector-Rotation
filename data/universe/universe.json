@@ -605,7 +605,7 @@
           "inception_source": "First published NAV in AMFI's record for scheme 152769, via MFAPI (retrieved 2026-10-12)"
         },
         {
-          "symbol": null,
+          "symbol": "METAL",
           "name": "Mirae Asset Nifty Metal ETF",
           "scheme_code": 152924,
           "isin": "INF769K01LY7",
@@ -1298,6 +1298,7 @@
           "inception_source": "First published NAV in AMFI's record for scheme 152870, via MFAPI (retrieved 2026-10-12)"
         },
         {
+          "symbol": "MOTOUR",
           "name": "Motilal Oswal Nifty India Tourism ETF",
           "scheme_code": 153618,
           "isin": "INF247L01FP2",
@@ -1561,6 +1562,7 @@
       "yfinance_symbol": null,
       "etfs": [
         {
+          "symbol": "MOSERVICE",
           "name": "Motilal Oswal Nifty Services Sector ETF",
           "scheme_code": 154033,
           "isin": "INF247L01GJ3",
