@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 from app.components.charts import CHART_CONFIG, nav_sparkline  # noqa: E402
 from app.components.header import header_state  # noqa: E402
 from app.components.metrics import get_metadata, health_summary, lineage_frame, source_label  # noqa: E402
+from app.components.tables import show_table  # noqa: E402
 from app.components.theme import _esc, chip, html_block, kpi_grid, note, page_header, section  # noqa: E402
 from app.data import UNIVERSE_PATH, load_cash_nav, load_decisions, load_index_panel  # noqa: E402
 from src.portfolio.live import load_registry  # noqa: E402
@@ -117,7 +118,7 @@ else:
             ("No fund yet", str(int(audit["First fund"].isna().sum())), "signal only, nothing to buy", ""),
         ]
     )
-    st.dataframe(
+    show_table(
         audit,
         hide_index=True,
         width="stretch",
@@ -183,7 +184,7 @@ else:
             "Resolved index": lineage["resolved_name"],
         }
     )
-    st.dataframe(display, hide_index=True, width="stretch", height=min(40 + 35 * len(display), 480),
+    show_table(display, hide_index=True, width="stretch", height=min(40 + 35 * len(display), 480),
                  column_config={"Exposure": st.column_config.TextColumn(pinned=True),
                                 "Value": st.column_config.TextColumn(help="TRI = total return; CLOSE = price index")})
 

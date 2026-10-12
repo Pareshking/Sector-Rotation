@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.components.allocation import allocation_frame, allocation_rows, edge_frame  # noqa: E402
+from app.components.tables import show_table  # noqa: E402
 from app.components.theme import (  # noqa: E402
     _esc,
     action_chip,
@@ -128,7 +129,7 @@ card_grid(_card(row) for row in rows)
 
 with st.expander("Allocation as a table", expanded=False):
     table = allocation_frame(rows)
-    st.dataframe(
+    show_table(
         table,
         hide_index=True,
         width="stretch",
