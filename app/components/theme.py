@@ -1,230 +1,267 @@
-"""Design system: tokens, typography, and dense HTML primitives.
+"""Design system: colour tokens for both themes, typography, and HTML primitives.
 
-Data-dense views are rendered as semantic HTML/CSS grid rather than as
-``st.columns`` + ``st.metric`` stacks. Streamlit collapses every column into a
-full-width block below ~640px, which turned a 43-row ranking into a 25,000px
-mobile scroll. A CSS grid keeps a row a row on a phone, and emits one DOM write
-instead of several hundred widgets.
+Everything visual lives here. Pages compose these primitives and never write
+their own CSS, so a colour, a chip or a card means the same thing on every page.
+
+Dense summaries (KPI cards, allocation cards, chips) are semantic HTML on a CSS
+grid rather than ``st.columns`` stacks: Streamlit collapses every column into a
+full-width block on a phone, while a grid with ``auto-fit`` keeps two cards to
+a row and emits one DOM write instead of dozens of widgets. Long tables stay
+``st.dataframe``, which already sorts, scrolls and keeps its header sticky.
+
+Colours come in two token sets selected from ``st.context.theme``; the native
+widgets follow the matching ``[theme.light]`` / ``[theme.dark]`` blocks in
+``.streamlit/config.toml``.
 """
 
 from __future__ import annotations
 
 import html
-from typing import Sequence
+from typing import Iterable, Sequence
 
 import pandas as pd
 import streamlit as st
 
-# Standard RRG quadrant convention: green leads, amber tops out, red lags,
-# blue turns up. Shared by the CSS badges and the Plotly traces so a colour
-# means the same thing in a chart and in a table.
-STAGE_COLORS = {
-    "Leading": "#059669",
-    "Weakening": "#D97706",
-    "Lagging": "#E11D48",
-    "Improving": "#2563EB",
-    "Insufficient Data": "#94A3B8",
+# --------------------------------------------------------------------------- #
+# tokens
+# --------------------------------------------------------------------------- #
+# Semantic roles, not hues: "pos" is outperformance / risk-on (emerald), "neg"
+# is drawdown / risk-off (crimson), "accent" is the active selection (indigo),
+# "info" is neutral information (sky), "warn" asks for attention (amber).
+LIGHT = {
+    "bg": "#FFFFFF", "surface": "#F8FAFC", "surface2": "#F1F5F9",
+    "line": "#E2E8F0", "line2": "#CBD5E1",
+    "text": "#0F172A", "text2": "#334155", "muted": "#64748B", "faint": "#94A3B8",
+    "pos": "#047857", "pos_bg": "#ECFDF5", "pos_line": "#A7F3D0",
+    "neg": "#BE123C", "neg_bg": "#FFF1F2", "neg_line": "#FECDD3",
+    "warn": "#B45309", "warn_bg": "#FFFBEB", "warn_line": "#FDE68A",
+    "accent": "#4338CA", "accent_bg": "#EEF2FF", "accent_line": "#C7D2FE",
+    "info": "#0369A1", "info_bg": "#F0F9FF", "info_line": "#BAE6FD",
+    "shadow": "0 1px 2px rgba(15,23,42,.05), 0 1px 3px rgba(15,23,42,.04)",
+    "header_bg": "rgba(255,255,255,.86)",
+}
+DARK = {
+    "bg": "#0A0A0B", "surface": "#131316", "surface2": "#1C1C21",
+    "line": "#27272A", "line2": "#3F3F46",
+    "text": "#F4F4F5", "text2": "#D4D4D8", "muted": "#A1A1AA", "faint": "#71717A",
+    "pos": "#34D399", "pos_bg": "rgba(16,185,129,.12)", "pos_line": "rgba(52,211,153,.32)",
+    "neg": "#FB7185", "neg_bg": "rgba(244,63,94,.12)", "neg_line": "rgba(251,113,133,.32)",
+    "warn": "#FBBF24", "warn_bg": "rgba(245,158,11,.12)", "warn_line": "rgba(251,191,36,.32)",
+    "accent": "#A5B4FC", "accent_bg": "rgba(99,102,241,.16)", "accent_line": "rgba(165,180,252,.34)",
+    "info": "#7DD3FC", "info_bg": "rgba(14,165,233,.12)", "info_line": "rgba(125,211,252,.32)",
+    "shadow": "0 1px 2px rgba(0,0,0,.4)",
+    "header_bg": "rgba(10,10,11,.84)",
 }
 
-# Target-portfolio actions (src/portfolio/construct.py), never RRG labels.
-ACTION_CLASS = {
-    "BUY": "buy",
-    "HOLD": "blue",
-    "TRIM": "amber",
-    "SELL": "red",
-    "NOT HELD": "slate",
-    "DATA UNAVAILABLE": "grey",
+TONES = ("pos", "neg", "warn", "accent", "info")
+
+# Target-portfolio actions (src/portfolio/construct.py) mapped to a tone.
+ACTION_TONE = {
+    "BUY": "pos",
+    "HOLD": "accent",
+    "TRIM": "warn",
+    "SELL": "neg",
+    "NOT HELD": "",
+    "DATA UNAVAILABLE": "",
+    "CASH": "info",
 }
+# Kept for callers that still use the earlier name.
+ACTION_CLASS = ACTION_TONE
+
+# RRG quadrants, display context only. The same hue in the chart and the chip.
+STAGE_TONE = {"Leading": "pos", "Weakening": "warn", "Lagging": "neg", "Improving": "info"}
+
+
+def is_dark() -> bool:
+    try:
+        return getattr(st.context.theme, "type", None) == "dark"
+    except Exception:  # noqa: BLE001 - no browser context (bare mode, tests)
+        return False
+
+
+def palette() -> dict[str, str]:
+    """The active token set, for charts and inline colours."""
+    return DARK if is_dark() else LIGHT
+
+
+def stage_colors() -> dict[str, str]:
+    tokens = palette()
+    colours = {stage: tokens[tone] for stage, tone in STAGE_TONE.items()}
+    colours["Insufficient Data"] = tokens["faint"]
+    return colours
+
+
+# The light values, for code that needs a colour outside a page render.
+STAGE_COLORS = {stage: LIGHT[tone] for stage, tone in STAGE_TONE.items()} | {"Insufficient Data": LIGHT["faint"]}
+
+
+def _vars(tokens: dict[str, str]) -> str:
+    return ";".join(f"--{key.replace('_', '-')}:{value}" for key, value in tokens.items())
+
 
 _CSS = """
-<style>
-:root{
---ink:#0B1220;--ink2:#1E293B;--muted:#64748B;--faint:#94A3B8;
---line:#E5E9F0;--line2:#CBD5E1;--bg:#FFFFFF;--bg2:#F8FAFC;--bg3:#F1F5F9;
---brand:#4338CA;--brand-bg:#EEF2FF;
---buy:#047857;--buy-bg:#ECFDF5;--buy-line:#A7F3D0;
---red:#BE123C;--red-bg:#FFF1F2;--red-line:#FECDD3;
---amber:#B45309;--amber-bg:#FFFBEB;--amber-line:#FDE68A;
---blue:#1D4ED8;--blue-bg:#EFF6FF;--blue-line:#BFDBFE;
---slate:#475569;--slate-bg:#F1F5F9;--slate-line:#E2E8F0;
---r:12px;--shadow:0 1px 2px rgba(11,18,32,.04),0 1px 3px rgba(11,18,32,.03);
---mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-}
-html,body,[class*="css"]{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;color:var(--ink);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-.stApp{background:var(--bg)}
-[data-testid="stMainBlockContainer"]{max-width:1400px;padding-top:1.5rem;padding-bottom:3.5rem}
-[data-testid="stHeader"]{background:rgba(255,255,255,.9);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--line)}
-h1,h2,h3,h4{color:var(--ink)!important;letter-spacing:-.028em!important;font-weight:750!important}
-h1{font-size:1.86rem!important;line-height:1.06!important;margin:0 0 .1rem!important;letter-spacing:-.036em!important}
-.block-container p{font-size:.875rem}
+:root{%(vars)s;--r:12px;--r-sm:8px;--nav-h:3.75rem}
+.stApp{background:var(--bg);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.stApp,.stApp p,.stApp li{color:var(--text)}
+/* --- clean defaults: no decoration bar, no dead space above the first line --- */
+[data-testid="stDecoration"]{display:none}
+[data-testid="stHeader"]{background:var(--header-bg);backdrop-filter:saturate(180%%) blur(10px);border-bottom:1px solid var(--line)}
+[data-testid="stMainBlockContainer"]{max-width:1360px;padding-top:calc(var(--nav-h) + .75rem);padding-bottom:4rem}
+h1,h2,h3,h4{letter-spacing:-.025em;color:var(--text)}
+h1{font-size:1.9rem!important;line-height:1.08!important;margin:0!important;padding:0!important}
+.stMarkdown p,.stMarkdown li{font-size:.9rem;line-height:1.62}
+.stMarkdown code{font-size:.82em;border-radius:6px}
+hr{border-color:var(--line)!important}
 
-/* ---------- page header ---------- */
-.sr-kicker{color:var(--brand);font-size:.66rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;margin:.15rem 0 .3rem}
-.sr-sub{color:var(--muted);font-size:.855rem;line-height:1.55;margin:.35rem 0 .2rem;max-width:74ch}
-.sr-section{display:flex;align-items:baseline;gap:10px;margin:1.5rem 0 .55rem}
-.sr-section-t{font-weight:800;font-size:.735rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2);white-space:nowrap}
-.sr-section-n{font-size:.735rem;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-section:after{content:"";height:1px;flex:1;background:var(--line);min-width:12px}
+/* --- page header --- */
+.ds-kicker{color:var(--accent);font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin:.2rem 0 .35rem}
+.ds-sub{color:var(--muted);font-size:.9rem;line-height:1.55;margin:.45rem 0 .25rem;max-width:78ch}
+.ds-section{display:flex;align-items:baseline;gap:12px;margin:1.9rem 0 .7rem}
+.ds-section-t{font-weight:700;font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text2);white-space:nowrap}
+.ds-section-n{font-size:.78rem;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ds-section:after{content:"";height:1px;flex:1;min-width:16px;background:var(--line)}
 
-/* ---------- pills & dots ---------- */
-.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:.645rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;border:1px solid}
-.pill-buy{color:var(--buy);background:var(--buy-bg);border-color:var(--buy-line)}
-.pill-red{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
-.pill-blue{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
-.pill-amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
-.pill-slate{color:var(--slate);background:var(--slate-bg);border-color:var(--slate-line)}
-.pill-grey{color:var(--faint);background:var(--bg3);border-color:var(--line)}
-.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+/* --- global status header: sticky below Streamlit's nav --- */
+[data-testid="stElementContainer"]:has(.ds-header){position:sticky;top:var(--nav-h);z-index:90}
+.ds-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:9px 14px;margin:-.25rem 0 .4rem;
+border:1px solid var(--line);border-radius:var(--r);background:var(--header-bg);backdrop-filter:saturate(180%%) blur(10px);box-shadow:var(--shadow)}
+.ds-brand{font-weight:750;font-size:.95rem;letter-spacing:-.02em;white-space:nowrap}
+.ds-stat{display:flex;flex-direction:column;gap:1px;min-width:0}
+.ds-stat-l{font-size:.6rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.ds-stat-v{font-size:.82rem;font-weight:650;color:var(--text);white-space:nowrap}
+.ds-header .ds-sep{width:1px;align-self:stretch;background:var(--line)}
+.ds-fresh{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:.76rem;color:var(--muted);white-space:nowrap}
+.ds-pulse{width:8px;height:8px;border-radius:50%%;background:var(--pos);box-shadow:0 0 0 3px var(--pos-bg)}
+.ds-pulse.stale{background:var(--warn);box-shadow:0 0 0 3px var(--warn-bg)}
 
-/* ---------- KPI strip: 4-up desktop, 2-up phone, never 1-up ---------- */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:.15rem 0 .2rem}
-.kpi{border:1px solid var(--line);border-radius:var(--r);background:var(--bg2);padding:11px 13px;box-shadow:var(--shadow)}
-.kpi-l{color:var(--muted);font-size:.635rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;line-height:1.2}
-.kpi-v{font-size:1.5rem;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:4px}
-.kpi-n{color:var(--muted);font-size:.7rem;margin-top:3px;line-height:1.35}
-.kpi-buy{background:var(--buy-bg);border-color:var(--buy-line)}.kpi-buy .kpi-v{color:var(--buy)}
-.kpi-red{background:var(--red-bg);border-color:var(--red-line)}.kpi-red .kpi-v{color:var(--red)}
-.kpi-blue{background:var(--blue-bg);border-color:var(--blue-line)}.kpi-blue .kpi-v{color:var(--blue)}
-.kpi-amber{background:var(--amber-bg);border-color:var(--amber-line)}.kpi-amber .kpi-v{color:var(--amber)}
+/* --- chips: regime, trade actions, stages --- */
+.ds-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);
+background:var(--surface2);color:var(--text2);font-size:.66rem;font-weight:750;letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;line-height:1.35}
+.ds-chip-lg{font-size:.74rem;padding:4px 11px}
+.ds-chip i{width:7px;height:7px;border-radius:50%%;background:currentColor;display:inline-block}
+%(tone_rules)s
 
-/* ---------- health strip ---------- */
-.hs{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;border:1px solid var(--line);border-left:3px solid var(--buy);
-border-radius:10px;background:var(--bg2);padding:9px 13px;margin:.5rem 0 .1rem;font-size:.75rem;color:var(--ink2)}
-.hs-warn{border-left-color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
-.hs b{font-variant-numeric:tabular-nums}
-.hs-sep{color:var(--line2)}
-.hs-time{margin-left:auto;color:var(--muted);font-size:.72rem;white-space:nowrap}
+/* --- KPI cards --- */
+.ds-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:.2rem 0 .3rem}
+.ds-kpi{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.ds-kpi-l{color:var(--muted);font-size:.64rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;line-height:1.25}
+.ds-kpi-v{font-size:1.55rem;font-weight:750;letter-spacing:-.03em;line-height:1.15;margin-top:5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ds-kpi-n{color:var(--muted);font-size:.74rem;margin-top:4px;line-height:1.4}
 
-/* ---------- signal rows: one exposure per row, never collapses ---------- */
-.rt{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--bg);box-shadow:var(--shadow)}
-.rt-nm{font-weight:650;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25;font-size:.815rem}
-.rt-cat{color:var(--faint);font-size:.635rem;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rt-pos{color:var(--buy)}.rt-neg{color:var(--red)}.rt-zero{color:var(--faint)}
-.sig{display:grid;align-items:center;column-gap:10px;row-gap:5px;padding:9px 12px;border-top:1px solid var(--line);
-grid-template-columns:24px 1fr auto;grid-template-areas:"rank name act" "meta meta meta"}
-.sig:first-child{border-top:none}
-.sig:hover{background:var(--bg2)}
-.sig-rank{grid-area:rank;color:var(--faint);font-size:.7rem;font-weight:700;font-variant-numeric:tabular-nums}
-.sig-name{grid-area:name;min-width:0;display:flex;flex-direction:column;gap:1px}
-.sig-act{grid-area:act;justify-self:end}
-.sig-meta{grid-area:meta;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:.72rem;color:var(--muted)}
-.sig-meta b{color:var(--ink2);font-variant-numeric:tabular-nums;font-weight:650}
-.sig-meta .zwrap{width:104px;flex:none}
-@media(min-width:900px){
-.sig{grid-template-columns:28px minmax(150px,1fr) 112px minmax(320px,1.35fr);
-grid-template-areas:"rank name act meta";row-gap:0;min-height:44px}
-.sig-meta{justify-content:flex-end;flex-wrap:nowrap}
-}
-/* momentum bar: zero-centred so sign is readable without parsing the number */
-.zwrap{display:flex;align-items:center;gap:7px}
-.ztrack{position:relative;flex:1;height:6px;border-radius:3px;background:var(--bg3);overflow:hidden}
-.ztrack:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
-.zfill{position:absolute;top:0;bottom:0;border-radius:3px}
-.znum{font-variant-numeric:tabular-nums;font-size:.72rem;font-weight:650;width:38px;text-align:right;flex:none}
+/* --- status bar (hero) --- */
+.ds-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--line);border-left:4px solid var(--accent);
+border-radius:var(--r);background:var(--surface);padding:14px 18px;margin:.6rem 0 .4rem;box-shadow:var(--shadow)}
+.ds-status-t{font-size:1.06rem;font-weight:750;letter-spacing:-.015em;color:var(--text)}
+.ds-status-d{font-size:.85rem;color:var(--text2);line-height:1.5}
+.ds-status-r{margin-left:auto;text-align:right}
+.ds-status-big{font-size:1.5rem;font-weight:750;letter-spacing:-.03em;line-height:1.1;color:var(--text)}
+.ds-status-cap{font-size:.66rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
 
-/* ---------- action board ---------- */
-.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:start}
-.bcol{border:1px solid var(--line);border-radius:var(--r);background:var(--bg);overflow:hidden;box-shadow:var(--shadow)}
-.bhead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);
-font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
-.bhead-buy{background:var(--buy-bg);color:var(--buy);border-bottom-color:var(--buy-line)}
-.bhead-red{background:var(--red-bg);color:var(--red);border-bottom-color:var(--red-line)}
-.bhead-blue{background:var(--blue-bg);color:var(--blue);border-bottom-color:var(--blue-line)}
-.bhead-amber{background:var(--amber-bg);color:var(--amber);border-bottom-color:var(--amber-line)}
-.bcount{font-variant-numeric:tabular-nums;font-size:.8rem;font-weight:800}
-.bitem{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:8px;row-gap:2px;padding:8px 12px;border-top:1px solid var(--line)}
-.bitem:first-of-type{border-top:none}
-.bitem:hover{background:var(--bg2)}
-.bnm{font-size:.815rem;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bmet{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:3px 9px;font-size:.685rem;color:var(--muted)}
-.bmet b{color:var(--ink2);font-variant-numeric:tabular-nums;font-weight:650}
-.bz{font-variant-numeric:tabular-nums;font-size:.78rem;font-weight:750}
-.bempty{padding:14px 12px;color:var(--faint);font-size:.76rem}
+/* --- cards and card grids --- */
+.ds-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;align-items:stretch}
+.ds-card{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:14px 16px;box-shadow:var(--shadow);
+display:flex;flex-direction:column;gap:10px;min-width:0}
+.ds-card-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.ds-card-t{font-weight:700;font-size:.98rem;letter-spacing:-.01em;color:var(--text);line-height:1.25}
+.ds-card-s{font-size:.76rem;color:var(--muted);line-height:1.4;margin-top:2px}
+.ds-weight{display:flex;align-items:baseline;gap:8px}
+.ds-weight b{font-size:2rem;font-weight:750;letter-spacing:-.035em;line-height:1;color:var(--text)}
+.ds-weight span{font-size:.78rem;color:var(--muted)}
+.ds-bar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden}
+.ds-bar i{display:block;height:100%%;border-radius:3px;background:var(--accent)}
+.ds-dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:.78rem;margin:0}
+.ds-dl dt{color:var(--muted)}
+.ds-dl dd{margin:0;text-align:right;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ds-card-cash{background:var(--info-bg);border-color:var(--info-line)}
+.ds-card-active{border-color:var(--accent-line);box-shadow:0 0 0 1px var(--accent-line),var(--shadow)}
 
-/* ---------- hero decision card + legend ---------- */
-.hero{border:1px solid var(--line);border-left:4px solid var(--slate);border-radius:var(--r);
-background:var(--bg2);padding:14px 16px;box-shadow:var(--shadow)}
-.hero-buy{border-left-color:var(--buy);background:var(--buy-bg);border-color:var(--buy-line)}
-.hero-red{border-left-color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
-.hero-blue{border-left-color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
-.hero-grey{border-left-color:var(--faint)}
-.hero-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.hero-act{font-size:1.35rem;font-weight:800;letter-spacing:-.02em}
-.hero-buy .hero-act{color:var(--buy)}.hero-red .hero-act{color:var(--red)}.hero-blue .hero-act{color:var(--blue)}
-.hero-why{margin-top:7px;font-size:.815rem;line-height:1.55;color:var(--ink2)}
-.hero-src{margin-top:6px;font-size:.685rem;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
-.legend{display:flex!important;flex-wrap:wrap;gap:5px 18px;font-size:.72rem;color:var(--muted);margin:.2rem 0 .5rem}
-.legend span{display:inline-flex!important;align-items:center;gap:6px;white-space:nowrap}
+/* --- trade log --- */
+.ds-log{display:flex;flex-direction:column;gap:8px}
+.ds-log-i{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:start;border:1px solid var(--line);border-radius:var(--r-sm);
+background:var(--surface);padding:11px 14px}
+.ds-log-i .ds-chip{grid-row:span 2;margin-top:1px}
+.ds-log-t{font-weight:650;font-size:.86rem;color:var(--text)}
+.ds-log-d{font-size:.8rem;color:var(--text2);line-height:1.55}
+.ds-log-v{grid-column:2;font-size:.74rem;color:var(--muted);line-height:1.5}
 
+/* --- edge list --- */
+.ds-rows{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--surface)}
+.ds-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:10px 14px;border-top:1px solid var(--line)}
+.ds-row:first-child{border-top:none}
+.ds-row-rank{font-weight:750;color:var(--faint);font-size:.84rem}
+.ds-row-name{font-weight:650;font-size:.86rem;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ds-row-meta{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:3px 14px;font-size:.74rem;color:var(--muted)}
+.ds-row-meta b{color:var(--text2);font-weight:650}
+@media(min-width:900px){.ds-row{grid-template-columns:34px minmax(160px,1fr) auto minmax(300px,1.4fr)}.ds-row-meta{grid-column:auto;justify-content:flex-end}}
 
-/* ---------- brand header ---------- */
-.brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);
-border-radius:var(--r);background:var(--bg2);padding:10px 14px;box-shadow:var(--shadow);margin:.25rem 0 .5rem}
-.brand-dots{display:flex;gap:6px;flex:none}
-.brand-dots i{width:11px;height:11px;border-radius:50%;display:block}
-.brand-name{font-weight:800;font-size:1.02rem;letter-spacing:-.02em;white-space:nowrap}
-.brand-sep{color:var(--line2);flex:none}
-.brand-stat{display:flex;align-items:center;gap:6px;font-size:.755rem;color:var(--ink2);white-space:nowrap;
-font-variant-numeric:tabular-nums}
-.brand-stat b{font-weight:750}
-.brand-when{margin-left:auto;color:var(--muted);font-size:.72rem;white-space:nowrap}
-@media(max-width:760px){
-.brand{padding:9px 11px;gap:8px 10px}
-.brand-name{font-size:.94rem}
-.brand-when{margin-left:0;width:100%}
-}
+/* --- notes --- */
+.ds-note{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);padding:11px 14px;font-size:.82rem;line-height:1.6;color:var(--text2)}
+.ds-note b{color:var(--text);font-weight:700}
+.ds-note-warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.ds-note-pos{background:var(--pos-bg);border-color:var(--pos-line)}
+.ds-note-neg{background:var(--neg-bg);border-color:var(--neg-line)}
+.ds-note-info{background:var(--info-bg);border-color:var(--info-line)}
+.ds-legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.76rem;color:var(--muted);margin:.1rem 0 .5rem}
+.ds-legend span{display:inline-flex;align-items:center;gap:6px}
+.ds-legend i{width:8px;height:8px;border-radius:50%%;display:inline-block}
+.ds-mono{font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:.84em}
 
-/* ---------- mobile navigation ----------
-   Below its breakpoint Streamlit does not render the top nav at all — it swaps
-   to a sidebar, putting every page behind an unlabelled chevron on the device
-   this app is most used on. CSS cannot bring back elements that were never
-   rendered, so we ship our own horizontal bar and hide the chevron. */
-.mnav{display:none}
+/* --- formula blocks (Method) --- */
+.ds-step{display:grid;grid-template-columns:30px 1fr;gap:4px 14px;margin:.4rem 0}
+.ds-step-n{width:26px;height:26px;border-radius:50%%;display:flex;align-items:center;justify-content:center;
+background:var(--accent-bg);color:var(--accent);font-weight:750;font-size:.8rem;border:1px solid var(--accent-line)}
+.ds-step-t{font-weight:700;font-size:.95rem;color:var(--text);padding-top:2px}
+.ds-step-b{grid-column:2;font-size:.86rem;color:var(--text2);line-height:1.6}
+
+/* --- Streamlit widget polish --- */
+[data-testid="stExpander"] details{border:1px solid var(--line)!important;border-radius:var(--r)!important;background:var(--surface)}
+[data-testid="stExpander"] summary{font-weight:650}
+[data-testid="stExpander"] summary:hover{color:var(--accent)}
+[data-testid="stDataFrame"]{border-radius:var(--r-sm)}
+.stPlotlyChart{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:6px 6px 2px;box-shadow:var(--shadow)}
+[data-testid="stMetricValue"]{letter-spacing:-.02em}
+[data-testid="stVerticalBlockBorderWrapper"]{border-color:var(--line)!important;border-radius:var(--r)!important;background:var(--surface)}
+[data-testid="stTabs"] [data-baseweb="tab-list"]{gap:2px;border-bottom:1px solid var(--line)}
+[data-testid="stTabs"] button[role="tab"]{font-weight:600}
+
+/* --- phone navigation: Streamlit drops its top nav below 768px --- */
+.ds-mnav{display:none}
 @media(max-width:768px){
 [data-testid="stSidebarCollapsedControl"],[data-testid="stExpandSidebarButton"]{display:none!important}
-.mnav{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
-padding:2px 0 8px;margin:0 -.6rem .2rem;padding-left:.6rem;padding-right:.6rem}
-.mnav::-webkit-scrollbar{display:none}
-.mnav a{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:999px;
-border:1px solid var(--line);background:var(--bg2);color:var(--ink2);text-decoration:none;
-font-size:.775rem;font-weight:600;white-space:nowrap}
-.mnav a.on{background:var(--brand-bg);border-color:#C7D2FE;color:var(--brand)}
+.ds-mnav{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0 8px;margin:0 -.5rem .3rem;padding-inline:.5rem}
+.ds-mnav::-webkit-scrollbar{display:none}
+.ds-mnav a{flex:0 0 auto;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);
+color:var(--text2)!important;text-decoration:none!important;font-size:.78rem;font-weight:600;white-space:nowrap}
+.ds-mnav a.on{background:var(--accent-bg);border-color:var(--accent-line);color:var(--accent)!important}
+[data-testid="stMainBlockContainer"]{padding-inline:.75rem}
+h1{font-size:1.45rem!important}
+.ds-kpis{grid-template-columns:1fr 1fr;gap:8px}
+.ds-kpi{padding:10px 12px}.ds-kpi-v{font-size:1.2rem}
+.ds-header{gap:6px 12px;padding:8px 11px}.ds-header .ds-sep{display:none}
+.ds-fresh{margin-left:0;width:100%%}
+.ds-status-r{margin-left:0;text-align:left}
 }
-
-/* ---------- notes / callouts ---------- */
-.note{border:1px solid var(--line);background:var(--bg2);border-radius:10px;padding:10px 12px;font-size:.765rem;line-height:1.5;color:var(--ink2)}
-.note-amber{border-color:var(--amber-line);background:var(--amber-bg);color:#78350F}
-.note-buy{border-color:var(--buy-line);background:var(--buy-bg);color:#065F46}
-.note-red{border-color:var(--red-line);background:var(--red-bg);color:#881337}
-.note b{font-weight:750}
-.rule{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
-.small{color:var(--muted);font-size:.72rem;line-height:1.5}
-
-/* ---------- streamlit widget polish ---------- */
-[data-testid="stMetric"]{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
-[data-testid="stMetricValue"]{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-[data-testid="stMetricLabel"]{color:var(--muted);font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
-[data-testid="stDataFrame"]{border-radius:10px}
-.stPlotlyChart{border:1px solid var(--line);border-radius:var(--r);padding:6px 4px 2px;background:var(--bg);box-shadow:var(--shadow)}
-[data-testid="stExpander"] details{border:1px solid var(--line)!important;border-radius:10px!important;background:var(--bg2)}
-[data-testid="stExpander"] summary{font-size:.775rem!important;font-weight:650}
-div[data-baseweb="select"]>div{border-radius:9px;border-color:var(--line2)}
-
-@media(max-width:760px){
-[data-testid="stMainBlockContainer"]{padding-left:.6rem;padding-right:.6rem;padding-top:66px}
-h1{font-size:1.44rem!important}
-.sr-sub{font-size:.8rem}
-.kpis{grid-template-columns:1fr 1fr;gap:8px}
-.kpi{padding:9px 11px}.kpi-v{font-size:1.24rem}
-.hs{font-size:.72rem;gap:6px 10px}.hs-time{margin-left:0;width:100%}
-.board{grid-template-columns:1fr}
-}
-</style>
 """
 
 
+def _tone_rules() -> str:
+    rules = []
+    for tone in TONES:
+        rules.append(
+            f".ds-chip-{tone}{{color:var(--{tone});background:var(--{tone}-bg);border-color:var(--{tone}-line)}}"
+            f".ds-kpi-{tone}{{background:var(--{tone}-bg);border-color:var(--{tone}-line)}}"
+            f".ds-kpi-{tone} .ds-kpi-v{{color:var(--{tone})}}"
+            f".ds-status-{tone}{{border-left-color:var(--{tone})}}"
+        )
+    return "\n".join(rules)
+
+
+def css(tokens: dict[str, str] | None = None) -> str:
+    return _CSS % {"vars": _vars(tokens or palette()), "tone_rules": _tone_rules()}
+
+
 def inject_theme() -> None:
-    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(f"<style>{css()}</style>", unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -234,6 +271,14 @@ def fmt_pct(value: object, digits: int = 1) -> str:
     try:
         value = float(value)
         return "—" if pd.isna(value) else f"{value * 100:.{digits}f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def fmt_signed_pct(value: object, digits: int = 1) -> str:
+    try:
+        value = float(value)
+        return "—" if pd.isna(value) else f"{value * 100:+.{digits}f}%"
     except (TypeError, ValueError):
         return "—"
 
@@ -254,87 +299,128 @@ def fmt_signed(value: object, digits: int = 2) -> str:
         return "—"
 
 
+def fmt_rupees(value: object) -> str:
+    """Indian units: ₹4.2 Cr, ₹30.0 L, ₹8,500."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if pd.isna(value):
+        return "—"
+    if abs(value) >= 1e7:
+        return f"₹{value / 1e7:.2f} Cr"
+    if abs(value) >= 1e5:
+        return f"₹{value / 1e5:.1f} L"
+    return f"₹{value:,.0f}"
+
+
+def tone_of(value: object, neutral: float = 0.0) -> str:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if pd.isna(value) or value == neutral:
+        return ""
+    return "pos" if value > neutral else "neg"
+
+
 def _esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""))
 
 
 # --------------------------------------------------------------------------- #
-# layout primitives
+# primitives: each returns HTML, or renders it
 # --------------------------------------------------------------------------- #
+def html_block(markup: str) -> None:
+    st.markdown(markup, unsafe_allow_html=True)
+
+
+def chip(text: str, tone: str = "", large: bool = False, dot: bool = False) -> str:
+    cls = "ds-chip" + (f" ds-chip-{tone}" if tone in TONES else "") + (" ds-chip-lg" if large else "")
+    return f'<span class="{cls}">{"<i></i>" if dot else ""}{_esc(text)}</span>'
+
+
+def action_chip(action: str, large: bool = False) -> str:
+    return chip(action, ACTION_TONE.get(str(action).upper(), ""), large=large)
+
+
 def page_header(kicker: str, title: str, subtitle: str = "") -> None:
-    parts = [f'<div class="sr-kicker">{_esc(kicker)}</div><h1>{_esc(title)}</h1>']
-    if subtitle:
-        parts.append(f'<div class="sr-sub">{_esc(subtitle)}</div>')
-    st.markdown("".join(parts), unsafe_allow_html=True)
+    sub = f'<div class="ds-sub">{_esc(subtitle)}</div>' if subtitle else ""
+    html_block(f'<div class="ds-kicker">{_esc(kicker)}</div><h1>{_esc(title)}</h1>{sub}')
 
 
-def section(title: str, note: str = "") -> None:
-    note_html = f'<div class="sr-section-n">{_esc(note)}</div>' if note else ""
-    st.markdown(
-        f'<div class="sr-section"><div class="sr-section-t">{_esc(title)}</div>{note_html}</div>',
-        unsafe_allow_html=True,
-    )
+def section(title: str, note_text: str = "") -> None:
+    sub = f'<div class="ds-section-n">{_esc(note_text)}</div>' if note_text else ""
+    html_block(f'<div class="ds-section"><div class="ds-section-t">{_esc(title)}</div>{sub}</div>')
 
 
 def note(text_html: str, tone: str = "") -> None:
-    cls = f"note note-{tone}" if tone else "note"
-    st.markdown(f'<div class="{cls}">{text_html}</div>', unsafe_allow_html=True)
+    """A callout. ``text_html`` is trusted markup: escape any data with ``_esc`` first."""
+    if tone == "amber":
+        tone = "warn"
+    cls = f"ds-note ds-note-{tone}" if tone in TONES else "ds-note"
+    html_block(f'<div class="{cls}">{text_html}</div>')
 
 
-def kpi_strip(items: Sequence[tuple[str, object, str, str]]) -> None:
-    """items: (label, value, note, tone) where tone is ''|'buy'|'red'|'blue'|'amber'."""
-    cards = []
-    for label, value, sub, tone in items:
-        cls = f"kpi kpi-{tone}" if tone else "kpi"
-        sub_html = f'<div class="kpi-n">{_esc(sub)}</div>' if sub else ""
-        cards.append(
-            f'<div class="{cls}"><div class="kpi-l">{_esc(label)}</div>'
-            f'<div class="kpi-v">{_esc(value)}</div>{sub_html}</div>'
-        )
-    st.markdown(f'<div class="kpis">{"".join(cards)}</div>', unsafe_allow_html=True)
+def kpi_html(label: str, value: object, sub: str = "", tone: str = "") -> str:
+    if tone == "amber":
+        tone = "warn"
+    elif tone in ("buy", "green"):
+        tone = "pos"
+    elif tone == "red":
+        tone = "neg"
+    elif tone == "blue":
+        tone = "accent"
+    cls = f"ds-kpi ds-kpi-{tone}" if tone in TONES else "ds-kpi"
+    sub_html = f'<div class="ds-kpi-n">{_esc(sub)}</div>' if sub else ""
+    return (
+        f'<div class="{cls}"><div class="ds-kpi-l">{_esc(label)}</div>'
+        f'<div class="ds-kpi-v">{_esc(value)}</div>{sub_html}</div>'
+    )
+
+
+def kpi_grid(items: Sequence[tuple[str, object, str, str]]) -> None:
+    """items: (label, value, note, tone); tone is '' or one of TONES."""
+    html_block(f'<div class="ds-kpis">{"".join(kpi_html(*item) for item in items)}</div>')
+
+
+# The earlier name, kept so nothing that imported it breaks.
+kpi_strip = kpi_grid
+
+
+def status_bar(title: str, detail_html: str = "", tone: str = "accent", right: tuple[str, str] | None = None) -> None:
+    """The one-line answer at the top of a page. ``right`` is (caption, big value)."""
+    tone = tone if tone in TONES else "accent"
+    right_html = (
+        f'<div class="ds-status-r"><div class="ds-status-cap">{_esc(right[0])}</div>'
+        f'<div class="ds-status-big">{_esc(right[1])}</div></div>'
+        if right
+        else ""
+    )
+    html_block(
+        f'<div class="ds-status ds-status-{tone}"><div><div class="ds-status-t">{_esc(title)}</div>'
+        f'<div class="ds-status-d">{detail_html}</div></div>{right_html}</div>'
+    )
+
+
+def card_grid(cards: Iterable[str]) -> None:
+    html_block(f'<div class="ds-grid">{"".join(cards)}</div>')
 
 
 def stage_legend() -> None:
+    colours = stage_colors()
     items = "".join(
-        f'<span><i class="dot" style="background:{colour}"></i>{_esc(stage)}</span>'
-        for stage, colour in STAGE_COLORS.items()
-        if stage != "Insufficient Data"
+        f'<span><i style="background:{colours[stage]}"></i>{_esc(stage)}</span>' for stage in STAGE_TONE
     )
-    st.markdown(f'<div class="legend">{items}</div>', unsafe_allow_html=True)
+    html_block(f'<div class="ds-legend">{items}</div>')
 
 
-def brand_header(
-    name: str,
-    regime: str = "",
-    stats: Sequence[tuple[str, str]] = (),
-    when: str = "",
-) -> None:
-    """Identity bar: product name, traffic-light dots, and market context.
-
-    Deliberately market state rather than app state — how many BUY signals the
-    board holds is on the board; what a reader wants at the top is whether the
-    tide is going in or out.
-    """
-    dots = (
-        '<div class="brand-dots"><i style="background:#FF5F57"></i>'
-        '<i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>'
-    )
-    chips = []
-    if regime:
-        colour = "var(--buy)" if regime.upper().startswith(("BULL", "RISK-ON")) else "var(--red)"
-        chips.append(
-            f'<span class="brand-sep">|</span><span class="brand-stat">'
-            f'<i class="dot" style="background:{colour}"></i>'
-            f'<b style="color:{colour};letter-spacing:.06em">{_esc(regime)}</b></span>'
+def steps(items: Sequence[tuple[str, str]]) -> None:
+    """Numbered steps: (title, body_html)."""
+    html_block(
+        "".join(
+            f'<div class="ds-step"><div class="ds-step-n">{i}</div><div class="ds-step-t">{_esc(title)}</div>'
+            f'<div class="ds-step-b">{body}</div></div>'
+            for i, (title, body) in enumerate(items, start=1)
         )
-    for label, value in stats:
-        chips.append(
-            f'<span class="brand-sep">|</span><span class="brand-stat">{_esc(label)} '
-            f'<b>{_esc(value)}</b></span>'
-        )
-    when_html = f'<span class="brand-when">{_esc(when)}</span>' if when else ""
-    st.markdown(
-        f'<div class="brand">{dots}<span class="brand-name">{_esc(name)}</span>'
-        f'{"".join(chips)}{when_html}</div>',
-        unsafe_allow_html=True,
     )

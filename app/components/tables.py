@@ -96,6 +96,28 @@ def column_config(keys) -> dict[str, object]:
     return config
 
 
+def _tint(value: object, cap: float) -> str:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if value != value or value == 0:
+        return ""
+    alpha = 0.06 + 0.30 * min(abs(value) / cap, 1.0)
+    rgb = "16,185,129" if value > 0 else "244,63,94"
+    return f"background-color: rgba({rgb},{alpha:.3f})"
+
+
+def tinted(frame: pd.DataFrame, columns, cap: float = 0.25):
+    """A Styler shading each return cell by sign and size; legible on light and dark.
+
+    ``cap`` is the magnitude at which the tint saturates, so one outlier does
+    not wash every other cell out.
+    """
+    present = [c for c in columns if c in frame.columns]
+    return frame.style.map(lambda v: _tint(v, cap), subset=present)
+
+
 def audit_frame(frame: pd.DataFrame, key: str | None = None, height: int = 420) -> None:
     """Raw model inputs, in the same vocabulary as every other table."""
     if frame is None or frame.empty:

@@ -1,10 +1,40 @@
+# Native widgets follow the same palette as app/components/theme.py, in both
+# themes; the viewer's system setting picks one unless they choose in the menu.
 [theme]
-base = "light"
-primaryColor = "#2563EB"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap, monospace"
+baseFontSize = 15
+baseRadius = "0.6rem"
+showWidgetBorder = true
+headingFontWeights = [750, 700, 650, 650, 600, 600]
+
+[theme.light]
+primaryColor = "#4338CA"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F8FAFC"
 textColor = "#0F172A"
-font = "sans serif"
+borderColor = "#E2E8F0"
+dataframeBorderColor = "#E2E8F0"
+dataframeHeaderBackgroundColor = "#F1F5F9"
+linkColor = "#4338CA"
+greenColor = "#047857"
+redColor = "#BE123C"
+blueColor = "#0369A1"
+chartCategoricalColors = ["#4338CA", "#047857", "#B45309", "#0369A1", "#BE123C", "#7C3AED"]
+
+[theme.dark]
+primaryColor = "#818CF8"
+backgroundColor = "#0A0A0B"
+secondaryBackgroundColor = "#131316"
+textColor = "#F4F4F5"
+borderColor = "#27272A"
+dataframeBorderColor = "#27272A"
+dataframeHeaderBackgroundColor = "#18181B"
+linkColor = "#A5B4FC"
+greenColor = "#34D399"
+redColor = "#FB7185"
+blueColor = "#7DD3FC"
+chartCategoricalColors = ["#818CF8", "#34D399", "#FBBF24", "#7DD3FC", "#FB7185", "#C4B5FD"]
 
 [server]
 headless = true
