@@ -246,6 +246,29 @@ def _inception_conflicts(report: QualityReport, new: dict) -> None:
         )
 
 
+def _etf_snapshot(report: QualityReport, new: dict) -> None:
+    """Say when ETF turnover and premium are not today's, or are missing.
+
+    A warning, not an error: the snapshot sizes an order, it never decides one.
+    """
+    info = new.get("etf_snapshot") or {}
+    status = info.get("status")
+    if status == "carried_forward":
+        report.add(
+            "warning",
+            "etf_snapshot_carried_forward",
+            f"NSE did not serve the ETF snapshot ({info.get('error') or 'no reason given'}); "
+            f"turnover and premium are carried forward from {info.get('as_of_utc')}.",
+        )
+    elif status == "unavailable":
+        report.add(
+            "warning",
+            "etf_snapshot_unavailable",
+            f"No NSE ETF snapshot ({info.get('error') or 'no reason given'}); ETF turnover, premium "
+            "and days-to-build are blank.",
+        )
+
+
 def _publication_age(report: QualityReport, new: dict) -> None:
     """Catch a silent publishing failure by its symptom, not its cause."""
     stamp = new.get("last_updated_utc")
@@ -289,6 +312,7 @@ def check_dataset(
     _restatements(report, new_metadata)
     _inception_conflicts(report, new_metadata)
     _publication_age(report, new_metadata)
+    _etf_snapshot(report, new_metadata)
     _staleness(report, index_prices)
     _flatlines(report, index_prices, "canonical index histories", "error")
     _flatlines(report, etf_prices, "ETF price histories", "warning")

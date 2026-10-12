@@ -118,3 +118,11 @@ def test_every_shipped_vehicle_records_an_isin_and_every_index_a_launch_date():
     assert not [x.id for x in exposures if x.launch_date is None]
     bounded = {x.id for x in exposures if x.launch_date_is_upper_bound}
     assert bounded == {"it", "mnc", "pse", "services"}
+
+
+def test_every_shipped_etf_has_an_nse_symbol():
+    """Without one, NSE's turnover and premium can never be matched to the fund."""
+    root = Path(__file__).resolve().parents[1]
+    exposures = UniverseRegistry.from_json(root / "data" / "universe" / "universe.json").all()
+    unmatched = [f"{x.id}/{v.name}" for x in exposures for v in x.etfs if v.vehicle == "etf" and not v.symbol]
+    assert not unmatched

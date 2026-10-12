@@ -8,12 +8,18 @@ actionable: whether the ETF trades at all, and whether it trades near its NAV.
 A persistent premium is a real, permanent cost to a buyer — a thinly traded
 sector ETF at a 2% premium hands back two years of the index's edge on entry.
 This is a point-in-time snapshot taken when the pipeline runs, not a history,
-and it is labelled as such wherever it is displayed.
+and it is labelled as such wherever it is displayed. When NSE refuses the
+request, the last snapshot it did serve is carried forward with its own
+timestamp for up to ``MAX_CARRY_FORWARD_DAYS``, rather than replaced by blanks.
 """
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 import requests
@@ -26,6 +32,11 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 TIMEOUT = (10, 45)
+ATTEMPTS = 3
+RETRY_PAUSE_SECONDS = 20.0
+# NSE intermittently refuses cloud runners. A snapshot this old is still a fair
+# guide to whether an ETF trades at all; an older one is dropped, not shown.
+MAX_CARRY_FORWARD_DAYS = 14
 
 COLUMNS = [
     "symbol",
@@ -48,23 +59,7 @@ def _number(value: object) -> float:
         return float("nan")
 
 
-def fetch_etf_snapshot(session: requests.Session | None = None) -> pd.DataFrame:
-    """One row per NSE-listed ETF. Returns an empty frame if NSE is unreachable.
-
-    The snapshot is decoration on the implementation layer; it must never be
-    able to fail a pipeline run that has already produced valid index history.
-    """
-    session = session or requests.Session()
-    session.headers.update(HEADERS)
-    try:
-        session.get(REFERER, timeout=TIMEOUT)
-        response = session.get(ETF_API, timeout=TIMEOUT)
-        response.raise_for_status()
-        rows = response.json().get("data", [])
-    except Exception:
-        return pd.DataFrame(columns=COLUMNS)
-
-    stamp = datetime.now(timezone.utc).isoformat()
+def _parse(rows: list[dict], stamp: str) -> pd.DataFrame:
     records = []
     for row in rows:
         symbol = str(row.get("symbol") or "").strip().upper()
@@ -86,6 +81,85 @@ def fetch_etf_snapshot(session: requests.Session | None = None) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(records, columns=COLUMNS) if records else pd.DataFrame(columns=COLUMNS)
+
+
+def fetch_etf_snapshot(
+    session_factory: Callable[[], requests.Session] = requests.Session,
+    attempts: int = ATTEMPTS,
+    pause: float = RETRY_PAUSE_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[pd.DataFrame, str]:
+    """One row per NSE-listed ETF, and why it is empty when it is.
+
+    Each attempt opens a fresh session, because NSE's bot screen sets its
+    cookies on the referer page and a refused session stays refused. The
+    snapshot is decoration on the implementation layer; it must never be able
+    to fail a pipeline run that has already produced valid index history, so
+    every failure is returned as a reason, never raised.
+    """
+    error = ""
+    for attempt in range(1, max(attempts, 1) + 1):
+        try:
+            session = session_factory()
+            session.headers.update(HEADERS)
+            session.get(REFERER, timeout=TIMEOUT)
+            response = session.get(ETF_API, timeout=TIMEOUT)
+            response.raise_for_status()
+            frame = _parse(response.json().get("data", []), datetime.now(timezone.utc).isoformat())
+            if not frame.empty:
+                return frame, ""
+            error = "NSE returned no ETF rows"
+        except Exception as exc:  # noqa: BLE001 - any failure is a reason, not a crash
+            error = f"{type(exc).__name__}: {exc}"[:300]
+        if attempt < attempts:
+            sleep(pause * attempt)
+    return pd.DataFrame(columns=COLUMNS), f"{error} (after {attempts} attempt(s))"
+
+
+@dataclass(frozen=True)
+class SnapshotResolution:
+    snapshot: pd.DataFrame
+    status: str            # "fresh", "carried_forward", "unavailable" or "skipped"
+    as_of_utc: str | None
+    error: str = ""
+
+    def report(self, matched: int, total: int) -> dict:
+        return {"status": self.status, "as_of_utc": self.as_of_utc, "matched_etfs": int(matched),
+                "total_etfs": int(total), "error": self.error}
+
+
+def load_last_snapshot(path: Path) -> pd.DataFrame:
+    """The last snapshot NSE actually served; empty if none was kept."""
+    try:
+        frame = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001 - a missing or unreadable file means no fallback
+        return pd.DataFrame(columns=COLUMNS)
+    return frame.reindex(columns=COLUMNS)
+
+
+def resolve_snapshot(
+    fresh: pd.DataFrame,
+    error: str,
+    last_good: pd.DataFrame,
+    now: datetime | None = None,
+    max_age_days: int = MAX_CARRY_FORWARD_DAYS,
+) -> SnapshotResolution:
+    """Today's snapshot if NSE served one, else the last good one while it is recent.
+
+    A refused fetch used to publish blanks over the previous run's good values;
+    carrying the last good snapshot forward keeps its own ``snapshot_utc`` so
+    every reader can see how old it is.
+    """
+    if fresh is not None and not fresh.empty:
+        return SnapshotResolution(fresh, "fresh", str(fresh["snapshot_utc"].dropna().max()), "")
+    stamps = pd.to_datetime(last_good.get("snapshot_utc"), errors="coerce", utc=True) if not last_good.empty else None
+    if stamps is not None and stamps.notna().any():
+        newest = stamps.max()
+        now = now or datetime.now(timezone.utc)
+        if (pd.Timestamp(now) - newest) <= pd.Timedelta(days=max_age_days):
+            return SnapshotResolution(last_good, "carried_forward", newest.isoformat(), error)
+        error = f"{error}; last good snapshot {newest:%Y-%m-%d} is older than {max_age_days} days".lstrip("; ")
+    return SnapshotResolution(pd.DataFrame(columns=COLUMNS), "unavailable", None, error)
 
 
 def merge_snapshot(etfs: pd.DataFrame, snapshot: pd.DataFrame) -> pd.DataFrame:
