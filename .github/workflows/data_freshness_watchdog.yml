@@ -29,7 +29,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # One open issue per stale episode, not one every 6 hours while it persists.
-          existing=$(gh issue list --label data-quality --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          # Matched by title: the data-quality label was never created in this
+          # repo, so issues opened without it and a label match never found
+          # them — 63 duplicates piled up that way.
+          existing=$(gh issue list --state open --search 'in:title "Data is stale"' --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "$existing" ]; then
             echo "Issue #$existing is already open for this; not creating another."
             exit 0
@@ -44,3 +47,12 @@ jobs:
           } > body.md
           gh issue create --title "Data is stale — $(date -u +'%d %b %Y %H:%M') UTC" --body-file body.md --label data-quality 2>/dev/null \
             || gh issue create --title "Data is stale — $(date -u +'%d %b %Y %H:%M') UTC" --body-file body.md
+      - name: Close the episode once fresh
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for n in $(gh issue list --state open --search 'in:title "Data is stale"' --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Resolved: $(python3 tools/check_freshness.py 2>&1 | tail -1)"
+          done
