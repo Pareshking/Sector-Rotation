@@ -106,7 +106,8 @@ _CSS = """
 /* --- clean defaults: no decoration bar, no dead space above the first line --- */
 [data-testid="stDecoration"]{display:none}
 [data-testid="stHeader"]{background:var(--header-bg);backdrop-filter:saturate(180%%) blur(10px);border-bottom:1px solid var(--line)}
-[data-testid="stMainBlockContainer"]{max-width:1360px;padding-top:calc(var(--nav-h) + .75rem);padding-bottom:4rem}
+/* Full width of layout="wide", as the Paresh app does; a fixed cap left wide screens two empty bands. */
+[data-testid="stMainBlockContainer"]{max-width:100%%;padding:calc(var(--nav-h) + .75rem) 1.5rem 4rem}
 h1,h2,h3,h4{letter-spacing:-.025em;color:var(--text)}
 h1{font-size:1.9rem!important;line-height:1.08!important;margin:0!important;padding:0!important}
 .stMarkdown p,.stMarkdown li{font-size:.9rem;line-height:1.62}
