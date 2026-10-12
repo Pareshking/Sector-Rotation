@@ -17,6 +17,7 @@
           "symbol": "AUTOBEES",
           "name": "Nippon India Nifty Auto ETF",
           "scheme_code": 149465,
+          "isin": "INF204KC1337",
           "yfinance_symbol": "AUTOBEES.NS",
           "exchange": "NSE",
           "inception_date": "2022-01-24",
@@ -26,6 +27,7 @@
           "symbol": "AUTOIETF",
           "name": "ICICI Prudential Nifty Auto ETF",
           "scheme_code": 149463,
+          "isin": "INF109KC10V2",
           "yfinance_symbol": "AUTOIETF.NS",
           "exchange": "NSE",
           "inception_date": "2022-01-13",
@@ -34,6 +36,7 @@
         {
           "name": "HDFC Nifty Auto Index Fund",
           "scheme_code": 154427,
+          "isin": "INF179KC1KQ0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -44,6 +47,7 @@
         {
           "name": "ICICI Prudential Nifty Auto Index Fund",
           "scheme_code": 150643,
+          "isin": "INF109KC16J4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -54,6 +58,7 @@
         {
           "name": "Nippon India Nifty Auto Index Fund",
           "scheme_code": 153064,
+          "isin": "INF204KC1EE8",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -64,6 +69,7 @@
         {
           "name": "Tata Nifty Auto Index Fund",
           "scheme_code": 152557,
+          "isin": "INF277KA1AU6",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -86,27 +92,30 @@
         {
           "symbol": "BANKBEES",
           "name": "Nippon India Nifty Bank ETF",
-          "scheme_code": 103175,
+          "scheme_code": 140087,
+          "isin": "INF204KB15I9",
           "yfinance_symbol": "BANKBEES.NS",
           "exchange": "NSE",
-          "inception_date": "2006-04-03",
-          "inception_source": "First published NAV in AMFI's record for scheme 103175, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2016-11-07",
+          "inception_source": "First published NAV in AMFI's record for scheme 140087, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "BANKNIFTY1",
           "name": "Kotak Nifty Bank ETF",
-          "scheme_code": 144078,
+          "scheme_code": 133122,
+          "isin": "INF174KA1ZB7",
           "yfinance_symbol": "BANKNIFTY1.NS",
           "exchange": "NSE",
           "aliases": [
             "KOTAKBKETF"
           ],
-          "inception_date": "2018-07-20",
-          "inception_source": "First published NAV in AMFI's record for scheme 144078, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2014-12-10",
+          "inception_source": "First published NAV in AMFI's record for scheme 133122, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Axis Nifty Bank Index Fund",
           "scheme_code": 152629,
+          "isin": "INF846K015W7",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -117,6 +126,7 @@
         {
           "name": "BANDHAN NIFTY BANK INDEX FUND",
           "scheme_code": 152793,
+          "isin": "INF194KB1IO1",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -127,6 +137,7 @@
         {
           "name": "DSP Nifty Bank Index Fund",
           "scheme_code": 152654,
+          "isin": "INF740KA1UO6",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -137,6 +148,7 @@
         {
           "name": "ICICI Prudential Nifty Bank Index Fund",
           "scheme_code": 149858,
+          "isin": "INF109KC11A4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -147,6 +159,7 @@
         {
           "name": "Invesco India Nifty Bank Index Fund",
           "scheme_code": 154343,
+          "isin": "INF205KA1BO4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -156,17 +169,19 @@
         },
         {
           "name": "Motilal Oswal Nifty Bank Index Fund",
-          "scheme_code": 147619,
+          "scheme_code": 147620,
+          "isin": "INF247L01890",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2019-09-11",
-          "inception_source": "First published NAV in AMFI's record for scheme 147619, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 147620, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Navi Nifty Bank Index Fund",
           "scheme_code": 149804,
+          "isin": "INF959L01FT4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -177,6 +192,7 @@
         {
           "name": "Nippon India Nifty Bank Index Fund",
           "scheme_code": 152389,
+          "isin": "INF204KC1BY2",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -186,13 +202,14 @@
         },
         {
           "name": "SBI Nifty Bank Index Fund",
-          "scheme_code": 153251,
+          "scheme_code": 153250,
+          "isin": "INF200KB1563",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2025-02-12",
-          "inception_source": "First published NAV in AMFI's record for scheme 153251, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 153250, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "launch_date": "2003-09-15",
@@ -232,6 +249,7 @@
           "symbol": "CHEMICAL",
           "name": "Kotak Nifty Chemicals ETF",
           "scheme_code": 153934,
+          "isin": "INF174KA1XV0",
           "yfinance_symbol": "CHEMICAL.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -243,6 +261,7 @@
           "symbol": "GROWWCHEM",
           "name": "Groww Nifty Chemicals ETF",
           "scheme_code": 154111,
+          "isin": "INF666M01NP5",
           "yfinance_symbol": "GROWWCHEM.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -287,24 +306,17 @@
         {
           "symbol": "BFSI",
           "name": "Mirae Asset Nifty Financial Services ETF",
-          "scheme_code": 149298,
+          "scheme_code": 149105,
+          "isin": "INF769K01HI8",
           "yfinance_symbol": "BFSI.NS",
           "exchange": "NSE",
-          "inception_date": "2021-12-08",
-          "inception_source": "First published NAV in AMFI's record for scheme 149298, via MFAPI (retrieved 2026-10-12)"
-        },
-        {
-          "symbol": null,
-          "name": "Kotak Nifty Financial Services Ex-Bank Fund",
-          "scheme_code": 149866,
-          "yfinance_symbol": null,
-          "exchange": "NSE",
-          "inception_date": "2022-02-18",
-          "inception_source": "First published NAV in AMFI's record for scheme 149866, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2021-08-02",
+          "inception_source": "First published NAV in AMFI's record for scheme 149105, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Tata Nifty Financial Services Index Fund",
           "scheme_code": 152577,
+          "isin": "INF277KA1BA6",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -328,6 +340,7 @@
           "symbol": "FINIETF",
           "name": "ICICI Prudential Nifty Financial Services Ex-Bank ETF",
           "scheme_code": 150879,
+          "isin": "INF109KC17L8",
           "yfinance_symbol": "FINIETF.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -338,6 +351,7 @@
         {
           "name": "Kotak Nifty Financial Services Ex-Bank Index Fund",
           "scheme_code": 151911,
+          "isin": "INF174KA1OR7",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -360,11 +374,12 @@
         {
           "symbol": "FMCGIETF",
           "name": "ICICI Prudential Nifty FMCG ETF",
-          "scheme_code": 149258,
+          "scheme_code": 149072,
+          "isin": "INF109KC19V3",
           "yfinance_symbol": "FMCGIETF.NS",
           "exchange": "NSE",
-          "inception_date": "2021-11-15",
-          "inception_source": "First published NAV in AMFI's record for scheme 149258, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2021-08-06",
+          "inception_source": "First published NAV in AMFI's record for scheme 149072, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "launch_date": "1999-09-22",
@@ -381,30 +396,33 @@
         {
           "symbol": "HEALTHADD",
           "name": "DSP Nifty Healthcare ETF",
-          "scheme_code": 149312,
+          "scheme_code": 152306,
+          "isin": "INF740KA1ZG1",
           "yfinance_symbol": "HEALTHADD.NS",
           "exchange": "NSE",
-          "inception_date": "2021-11-01",
-          "inception_source": "First published NAV in AMFI's record for scheme 149312, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2024-02-01",
+          "inception_source": "First published NAV in AMFI's record for scheme 152306, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "HEALTHIETF",
           "name": "ICICI Prudential Nifty Healthcare ETF",
           "scheme_code": 148957,
+          "isin": "INF109KC1Q72",
           "yfinance_symbol": "HEALTHIETF.NS",
           "exchange": "NSE",
           "inception_date": "2021-05-21",
-          "inception_source": "First published NAV in AMFI's record for scheme 148957, via MFAPI (retrieved 2026-10-12). Scheme code corrected from 148858, which has no NAV history; 148957 is the exact-name match and its NAV tracks Nifty Healthcare TRI with daily-return correlation 1.00."
+          "inception_source": "First published NAV in AMFI's record for scheme 148957, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "DSP Nifty Healthcare Index Fund",
-          "scheme_code": 153593,
+          "scheme_code": 153594,
+          "isin": "INF740KA1WF0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2025-06-20",
-          "inception_source": "First published NAV in AMFI's record for scheme 153593, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 153594, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "launch_date": "2020-11-18",
@@ -421,52 +439,60 @@
         {
           "symbol": "ITBEES",
           "name": "Nippon India Nifty IT ETF",
-          "scheme_code": 147983,
+          "scheme_code": 148408,
+          "isin": "INF204KB15V2",
           "yfinance_symbol": "ITBEES.NS",
           "exchange": "NSE",
-          "inception_date": "2020-01-24",
-          "inception_source": "First published NAV in AMFI's record for scheme 147983, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2020-06-30",
+          "inception_source": "First published NAV in AMFI's record for scheme 148408, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "SBIETFIT",
           "name": "SBI Nifty IT ETF",
-          "scheme_code": 148810,
+          "scheme_code": 148542,
+          "isin": "INF200KA1S14",
           "yfinance_symbol": "SBIETFIT.NS",
-          "exchange": "NSE"
+          "exchange": "NSE",
+          "inception_date": "2020-10-21",
+          "inception_source": "First published NAV in AMFI's record for scheme 148542, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "TECH",
-          "name": "ICICI Prudential Nifty IT ETF",
-          "scheme_code": 148560,
+          "name": "Aditya Birla Sun Life Nifty IT ETF",
+          "scheme_code": 149293,
+          "isin": "INF209KB11D8",
           "yfinance_symbol": "TECH.NS",
           "exchange": "NSE",
-          "inception_date": "2020-11-06",
-          "inception_source": "First published NAV in AMFI's record for scheme 148560, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2021-11-03",
+          "inception_source": "First published NAV in AMFI's record for scheme 149293, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "ITETF",
           "name": "Mirae Asset Nifty IT ETF",
-          "scheme_code": 148560,
+          "scheme_code": 152155,
+          "isin": "INF769K01KV5",
           "yfinance_symbol": "ITETF.NS",
           "exchange": "NSE",
-          "inception_date": "2020-11-06",
-          "inception_source": "First published NAV in AMFI's record for scheme 148560, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2023-10-23",
+          "inception_source": "First published NAV in AMFI's record for scheme 152155, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "IT",
           "name": "Kotak Nifty IT ETF",
-          "scheme_code": 147890,
+          "scheme_code": 148763,
+          "isin": "INF174KA1GC5",
           "yfinance_symbol": "IT.NS",
           "exchange": "NSE",
           "aliases": [
             "KOTAKIT"
           ],
-          "inception_date": "2020-01-31",
-          "inception_source": "First published NAV in AMFI's record for scheme 147890, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2021-03-05",
+          "inception_source": "First published NAV in AMFI's record for scheme 148763, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Axis Nifty IT Index Fund",
           "scheme_code": 151785,
+          "isin": "INF846K017R3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -477,6 +503,7 @@
         {
           "name": "Bandhan Nifty IT Index Fund",
           "scheme_code": 152041,
+          "isin": "INF194KB1GK3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -487,6 +514,7 @@
         {
           "name": "DSP Nifty IT Index Fund",
           "scheme_code": 153590,
+          "isin": "INF740KA1WL8",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -497,6 +525,7 @@
         {
           "name": "ICICI Prudential Nifty IT Index Fund",
           "scheme_code": 150468,
+          "isin": "INF109KC13E2",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -507,6 +536,7 @@
         {
           "name": "Navi NiftyIT Index Fund",
           "scheme_code": 152535,
+          "isin": "INF959L01HM5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -517,6 +547,7 @@
         {
           "name": "Nippon India Nifty IT Index Fund",
           "scheme_code": 152392,
+          "isin": "INF204KC1CE2",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -527,6 +558,7 @@
         {
           "name": "SBI Nifty IT Index Fund",
           "scheme_code": 153320,
+          "isin": "INF200KB1621",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -536,7 +568,9 @@
         }
       ],
       "base_date": "1996-01-01",
-      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_it.pdf (retrieved 2026-10-12)"
+      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_it.pdf (retrieved 2026-10-12)",
+      "launch_date": "2015-09-22",
+      "launch_date_is_upper_bound": true
     },
     {
       "id": "media",
@@ -559,20 +593,22 @@
         {
           "symbol": "METALIETF",
           "name": "ICICI Prudential Nifty Metal ETF",
-          "scheme_code": 150162,
+          "scheme_code": 152769,
+          "isin": "INF109KC19W1",
           "yfinance_symbol": "METALIETF.NS",
           "exchange": "NSE",
           "aliases": [
             "ICICIMETAL",
             "METALETF"
           ],
-          "inception_date": "2022-03-14",
-          "inception_source": "First published NAV in AMFI's record for scheme 150162, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2024-08-16",
+          "inception_source": "First published NAV in AMFI's record for scheme 152769, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": null,
           "name": "Mirae Asset Nifty Metal ETF",
           "scheme_code": 152924,
+          "isin": "INF769K01LY7",
           "yfinance_symbol": null,
           "exchange": "NSE",
           "inception_date": "2024-10-04",
@@ -593,6 +629,7 @@
         {
           "name": "Motilal Oswal Nifty MidSmall Financial Services Index Fund",
           "scheme_code": 153027,
+          "isin": "INF247L01DW3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -616,6 +653,7 @@
           "symbol": "OILIETF",
           "name": "ICICI Prudential Nifty Oil & Gas ETF",
           "scheme_code": 152748,
+          "isin": "INF109KC18W3",
           "yfinance_symbol": "OILIETF.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -638,15 +676,17 @@
         {
           "symbol": "PHARMABEES",
           "name": "Nippon India Nifty Pharma ETF",
-          "scheme_code": 149028,
+          "scheme_code": 149008,
+          "isin": "INF204KC1089",
           "yfinance_symbol": "PHARMABEES.NS",
           "exchange": "NSE",
-          "inception_date": "2021-07-15",
-          "inception_source": "First published NAV in AMFI's record for scheme 149028, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2021-07-06",
+          "inception_source": "First published NAV in AMFI's record for scheme 149008, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "ICICI Prudential Nifty Pharma Index Fund",
           "scheme_code": 150930,
+          "isin": "INF109KC11M9",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -681,6 +721,7 @@
           "symbol": "HDFCPVTBAN",
           "name": "HDFC NIFTY Private Bank ETF",
           "scheme_code": 150802,
+          "isin": "INF179KC1HZ7",
           "yfinance_symbol": "HDFCPVTBAN.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -690,9 +731,22 @@
         },
         {
           "symbol": "NPBET",
+          "name": "Tata Nifty Private Bank ETF",
+          "scheme_code": 147614,
+          "isin": "INF277K010X4",
+          "yfinance_symbol": "NPBET.NS",
+          "exchange": "NSE",
+          "aliases": [],
+          "tracking": {},
+          "inception_date": "2019-09-04",
+          "inception_source": "First published NAV in AMFI's record for scheme 147614, via MFAPI (retrieved 2026-10-12)"
+        },
+        {
+          "symbol": "PVTBANK",
           "name": "Kotak Nifty Private Bank ETF",
           "scheme_code": 154491,
-          "yfinance_symbol": "NPBET.NS",
+          "isin": "INF174KA1A94",
+          "yfinance_symbol": "PVTBANK.NS",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -703,6 +757,7 @@
           "symbol": "PVTBANIETF",
           "name": "ICICI Prudential Nifty Private Bank ETF",
           "scheme_code": 147530,
+          "isin": "INF109KC18U7",
           "yfinance_symbol": "PVTBANIETF.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -714,6 +769,7 @@
           "symbol": "PVTBANKADD",
           "name": "DSP Nifty Private Bank ETF",
           "scheme_code": 151887,
+          "isin": "INF740KA1TA7",
           "yfinance_symbol": "PVTBANKADD.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -725,6 +781,7 @@
           "symbol": "PVTBKGROWW",
           "name": "Groww Nifty Private Bank ETF",
           "scheme_code": 154345,
+          "isin": "INF666M01OT5",
           "yfinance_symbol": "PVTBKGROWW.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -736,6 +793,7 @@
           "symbol": "SBIETFPB",
           "name": "SBI Nifty Private Bank ETF",
           "scheme_code": 148541,
+          "isin": "INF200KA1S22",
           "yfinance_symbol": "SBIETFPB.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -746,6 +804,7 @@
         {
           "name": "DSP Nifty Private Bank Index Fund",
           "scheme_code": 153348,
+          "isin": "INF740KA1VN6",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -756,6 +815,7 @@
         {
           "name": "Groww Nifty Private Bank Index Fund",
           "scheme_code": 154346,
+          "isin": "INF666M01OU3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -766,6 +826,7 @@
         {
           "name": "ICICI Prudential Nifty Private Bank Index Fund",
           "scheme_code": 153679,
+          "isin": "INF109K1A369",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -776,6 +837,7 @@
         {
           "name": "UTI Nifty Private Bank Index Fund",
           "scheme_code": 152864,
+          "isin": "INF789F1AZJ5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -798,15 +860,17 @@
         {
           "symbol": "PSUBNKBEES",
           "name": "Nippon India Nifty PSU Bank ETF",
-          "scheme_code": 105658,
+          "scheme_code": 140089,
+          "isin": "INF204KB16I7",
           "yfinance_symbol": "PSUBNKBEES.NS",
           "exchange": "NSE",
-          "inception_date": "2007-05-08",
-          "inception_source": "First published NAV in AMFI's record for scheme 105658, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2016-11-07",
+          "inception_source": "First published NAV in AMFI's record for scheme 140089, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Groww Nifty PSU Bank Index Fund",
           "scheme_code": 154278,
+          "isin": "INF666M01OH0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -830,6 +894,7 @@
           "symbol": "MOREALTY",
           "name": "Motilal Oswal Nifty Realty ETF",
           "scheme_code": 152541,
+          "isin": "INF247L01CI4",
           "yfinance_symbol": "MOREALTY.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -839,17 +904,19 @@
         },
         {
           "name": "HDFC NIFTY Realty Index Fund",
-          "scheme_code": 152522,
+          "scheme_code": 152521,
+          "isin": "INF179KC1IE0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2024-03-26",
-          "inception_source": "First published NAV in AMFI's record for scheme 152522, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 152521, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Nippon India Nifty Realty Index Fund",
           "scheme_code": 153060,
+          "isin": "INF204KC1DY8",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -860,6 +927,7 @@
         {
           "name": "Tata Nifty Realty Index Fund",
           "scheme_code": 152570,
+          "isin": "INF277KA1AO9",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -893,24 +961,27 @@
         {
           "symbol": "GROWWDEFNC",
           "name": "Groww Nifty India Defence ETF",
-          "scheme_code": 152846,
+          "scheme_code": 152845,
+          "isin": "INF666M01IO8",
           "yfinance_symbol": "GROWWDEFNC.NS",
+          "exchange": "NSE",
+          "inception_date": "2024-10-10",
+          "inception_source": "First published NAV in AMFI's record for scheme 152845, via MFAPI (retrieved 2026-10-12)"
+        },
+        {
+          "symbol": "MODEFENCE",
+          "name": "Motilal Oswal Nifty India Defence ETF",
+          "scheme_code": 152846,
+          "isin": "INF247L01DJ0",
+          "yfinance_symbol": "MODEFENCE.NS",
           "exchange": "NSE",
           "inception_date": "2024-08-27",
           "inception_source": "First published NAV in AMFI's record for scheme 152846, via MFAPI (retrieved 2026-10-12)"
         },
         {
-          "symbol": null,
-          "name": "Motilal Oswal Nifty India Defence ETF",
-          "scheme_code": 152865,
-          "yfinance_symbol": null,
-          "exchange": "NSE",
-          "inception_date": "2024-09-24",
-          "inception_source": "First published NAV in AMFI's record for scheme 152865, via MFAPI (retrieved 2026-10-12)"
-        },
-        {
           "name": "Aditya Birla Sun Life Nifty India Defence Index Fund",
           "scheme_code": 152798,
+          "isin": "INF209KC1183",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -921,6 +992,7 @@
         {
           "name": "Axis Nifty India Defence Index Fund",
           "scheme_code": 154326,
+          "isin": "INF846KA1523",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -931,6 +1003,7 @@
         {
           "name": "Motilal Oswal Nifty India Defence Index Fund",
           "scheme_code": 152712,
+          "isin": "INF247L01CW5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -954,6 +1027,7 @@
           "symbol": "EVINDIA",
           "name": "Mirae Asset Nifty EV and New Age Automotive ETF",
           "scheme_code": 152715,
+          "isin": "INF769K01LQ3",
           "yfinance_symbol": "EVINDIA.NS",
           "exchange": "NSE",
           "aliases": [
@@ -977,15 +1051,17 @@
         {
           "symbol": "MAKEINDIA",
           "name": "Mirae Asset Nifty India Manufacturing ETF",
-          "scheme_code": 149296,
+          "scheme_code": 149786,
+          "isin": "INF769K01IB1",
           "yfinance_symbol": "MAKEINDIA.NS",
           "exchange": "NSE",
-          "inception_date": "2021-12-08",
-          "inception_source": "First published NAV in AMFI's record for scheme 149296, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2022-01-28",
+          "inception_source": "First published NAV in AMFI's record for scheme 149786, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "Navi Nifty India Manufacturing Index Fund",
           "scheme_code": 150515,
+          "isin": "INF959L01GD6",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -995,17 +1071,19 @@
         },
         {
           "name": "Nippon India Nifty India Manufacturing Index Fund",
-          "scheme_code": 153807,
+          "scheme_code": 153806,
+          "isin": "INF204KC1GL8",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2025-08-28",
-          "inception_source": "First published NAV in AMFI's record for scheme 153807, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 153806, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "UTI Nifty India Manufacturing Index Fund",
           "scheme_code": 153270,
+          "isin": "INF789F1AB48",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1028,11 +1106,12 @@
         {
           "symbol": "INFRABEES",
           "name": "Nippon India Nifty Infrastructure ETF",
-          "scheme_code": 112938,
+          "scheme_code": 140102,
+          "isin": "INF732E01268",
           "yfinance_symbol": "INFRABEES.NS",
           "exchange": "NSE",
-          "inception_date": "2010-05-21",
-          "inception_source": "First published NAV in AMFI's record for scheme 112938, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2016-11-07",
+          "inception_source": "First published NAV in AMFI's record for scheme 140102, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "launch_date": "2007-08-07",
@@ -1050,6 +1129,7 @@
           "symbol": "INFRA",
           "name": "Mirae Asset Nifty India Infrastructure & Logistics ETF",
           "scheme_code": 154181,
+          "isin": "INF769K01QB4",
           "yfinance_symbol": "INFRA.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1073,6 +1153,7 @@
           "symbol": "GROWWRAIL",
           "name": "Groww Nifty India Railways PSU ETF",
           "scheme_code": 153229,
+          "isin": "INF666M01JJ6",
           "yfinance_symbol": "GROWWRAIL.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1083,6 +1164,7 @@
         {
           "name": "Groww Nifty India Railways PSU Index Fund",
           "scheme_code": 153230,
+          "isin": "INF666M01JK4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1105,37 +1187,41 @@
         {
           "symbol": "CONSUMBEES",
           "name": "Nippon India Nifty Consumption ETF",
-          "scheme_code": 150244,
+          "scheme_code": 128331,
+          "isin": "INF204KA1LD7",
           "yfinance_symbol": "CONSUMBEES.NS",
           "exchange": "NSE",
-          "inception_date": "2022-03-14",
-          "inception_source": "First published NAV in AMFI's record for scheme 150244, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2014-04-10",
+          "inception_source": "First published NAV in AMFI's record for scheme 128331, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "CONS",
           "name": "Kotak Nifty India Consumption ETF",
-          "scheme_code": 149300,
+          "scheme_code": 150492,
+          "isin": "INF174KA1ZF8",
           "yfinance_symbol": "CONS.NS",
           "exchange": "NSE",
           "aliases": [
             "KOTAKCONS"
           ],
-          "inception_date": "2021-12-08",
-          "inception_source": "First published NAV in AMFI's record for scheme 149300, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2022-08-03",
+          "inception_source": "First published NAV in AMFI's record for scheme 150492, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "HDFC Nifty India Consumption Index Fund",
-          "scheme_code": 154180,
+          "scheme_code": 154179,
+          "isin": "INF179KC1KA4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
           "vehicle": "index_fund",
           "inception_date": "2026-02-18",
-          "inception_source": "First published NAV in AMFI's record for scheme 154180, via MFAPI (retrieved 2026-10-12)"
+          "inception_source": "First published NAV in AMFI's record for scheme 154179, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "name": "SBI Nifty India Consumption Index Fund",
           "scheme_code": 153015,
+          "isin": "INF200KB1449",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1158,6 +1244,7 @@
         {
           "name": "HDFC Nifty India Digital Index Fund",
           "scheme_code": 153097,
+          "isin": "INF179KC1JB4",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1180,11 +1267,12 @@
         {
           "symbol": "GROWWNET",
           "name": "Groww Nifty India Internet ETF",
-          "scheme_code": 152848,
+          "scheme_code": 153625,
+          "isin": "INF666M01LI4",
           "yfinance_symbol": "GROWWNET.NS",
           "exchange": "NSE",
-          "inception_date": "2024-11-06",
-          "inception_source": "First published NAV in AMFI's record for scheme 152848, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2025-07-02",
+          "inception_source": "First published NAV in AMFI's record for scheme 153625, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "launch_date": "2025-02-28",
@@ -1201,6 +1289,7 @@
         {
           "name": "Kotak Nifty India Tourism Index Fund",
           "scheme_code": 152870,
+          "isin": "INF174KA1SZ1",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1211,6 +1300,7 @@
         {
           "name": "Motilal Oswal Nifty India Tourism ETF",
           "scheme_code": 153618,
+          "isin": "INF247L01FP2",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1221,6 +1311,7 @@
         {
           "name": "Tata Nifty India Tourism Index Fund",
           "scheme_code": 152742,
+          "isin": "INF277KA1CC0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1244,6 +1335,7 @@
           "symbol": "ENERGY",
           "name": "Mirae Asset Nifty Energy ETF",
           "scheme_code": 153945,
+          "isin": "INF769K01PR2",
           "yfinance_symbol": "ENERGY.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1255,6 +1347,7 @@
           "symbol": "MOENERGY",
           "name": "Motilal Oswal Nifty Energy ETF",
           "scheme_code": 153931,
+          "isin": "INF247L01GH7",
           "yfinance_symbol": "MOENERGY.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1278,6 +1371,7 @@
           "symbol": "COMMOIETF",
           "name": "ICICI Prudential Nifty Commodities ETF",
           "scheme_code": 151207,
+          "isin": "INF109KC19O8",
           "yfinance_symbol": "COMMOIETF.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1288,6 +1382,7 @@
         {
           "name": "Kotak Nifty Commodities Index Fund",
           "scheme_code": 153353,
+          "isin": "INF174KA1VE0",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1311,6 +1406,7 @@
           "symbol": "GROWWCAPM",
           "name": "Groww Nifty Capital Markets ETF",
           "scheme_code": 153907,
+          "isin": "INF666M01MM4",
           "yfinance_symbol": "GROWWCAPM.NS",
           "exchange": "NSE",
           "aliases": [],
@@ -1321,6 +1417,7 @@
         {
           "name": "Axis Nifty Capital Markets Index Fund",
           "scheme_code": 154348,
+          "isin": "INF846KA1549",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1331,6 +1428,7 @@
         {
           "name": "Motilal Oswal Nifty Capital Market Index Fund",
           "scheme_code": 153138,
+          "isin": "INF247L01EB5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1341,6 +1439,7 @@
         {
           "name": "Tata Nifty Capital Markets Index Fund",
           "scheme_code": 152951,
+          "isin": "INF277KA1CO5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1363,27 +1462,31 @@
         {
           "symbol": "MNC",
           "name": "Kotak Nifty MNC ETF",
-          "scheme_code": 149306,
+          "scheme_code": 150531,
+          "isin": "INF174KA1JF2",
           "yfinance_symbol": "MNC.NS",
           "exchange": "NSE",
           "aliases": [
             "KOTAKMNC"
           ],
-          "inception_date": "2021-11-15",
-          "inception_source": "First published NAV in AMFI's record for scheme 149306, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2022-08-11",
+          "inception_source": "First published NAV in AMFI's record for scheme 150531, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "MOMNC",
           "name": "Motilal Oswal Nifty MNC ETF",
-          "scheme_code": 152912,
+          "scheme_code": 154062,
+          "isin": "INF247L01GK1",
           "yfinance_symbol": "MOMNC.NS",
           "exchange": "NSE",
-          "inception_date": "2024-10-31",
-          "inception_source": "First published NAV in AMFI's record for scheme 152912, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2025-12-04",
+          "inception_source": "First published NAV in AMFI's record for scheme 154062, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "base_date": "1995-01-02",
-      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_mnc.pdf (retrieved 2026-10-12)"
+      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_mnc.pdf (retrieved 2026-10-12)",
+      "launch_date": "2015-09-22",
+      "launch_date_is_upper_bound": true
     },
     {
       "id": "pse",
@@ -1395,33 +1498,38 @@
         {
           "symbol": "MOPSE",
           "name": "Motilal Oswal Nifty PSE ETF",
-          "scheme_code": 152914,
+          "scheme_code": 153608,
+          "isin": "INF247L01FO5",
           "yfinance_symbol": "MOPSE.NS",
           "exchange": "NSE",
-          "inception_date": "2024-10-14",
-          "inception_source": "First published NAV in AMFI's record for scheme 152914, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2025-06-05",
+          "inception_source": "First published NAV in AMFI's record for scheme 153608, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "GROWWPSE",
           "name": "Groww Nifty PSE ETF",
-          "scheme_code": 152850,
+          "scheme_code": 154163,
+          "isin": "INF666M01NQ3",
           "yfinance_symbol": "GROWWPSE.NS",
           "exchange": "NSE",
-          "inception_date": "2024-09-10",
-          "inception_source": "First published NAV in AMFI's record for scheme 152850, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2026-02-10",
+          "inception_source": "First published NAV in AMFI's record for scheme 154163, via MFAPI (retrieved 2026-10-12)"
         },
         {
           "symbol": "ICICIB22",
           "name": "Bharat 22 ETF",
-          "scheme_code": 143265,
+          "scheme_code": 141957,
+          "isin": "INF109KB15Y7",
           "yfinance_symbol": "ICICIB22.NS",
           "exchange": "NSE",
-          "inception_date": "2018-05-14",
-          "inception_source": "First published NAV in AMFI's record for scheme 143265, via MFAPI (retrieved 2026-10-12)"
+          "inception_date": "2018-07-03",
+          "inception_source": "First published NAV in AMFI's record for scheme 141957, via MFAPI (retrieved 2026-10-12)"
         }
       ],
       "base_date": "1995-01-02",
-      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_pse.pdf (retrieved 2026-10-12)"
+      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_pse.pdf (retrieved 2026-10-12)",
+      "launch_date": "2015-09-22",
+      "launch_date_is_upper_bound": true
     },
     {
       "id": "cpse",
@@ -1434,6 +1542,7 @@
           "symbol": "CPSEETF",
           "name": "CPSE ETF",
           "scheme_code": 140107,
+          "isin": "INF457M01133",
           "yfinance_symbol": "CPSEETF.NS",
           "exchange": "NSE",
           "inception_date": "2016-11-07",
@@ -1454,6 +1563,7 @@
         {
           "name": "Motilal Oswal Nifty Services Sector ETF",
           "scheme_code": 154033,
+          "isin": "INF247L01GJ3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1463,7 +1573,9 @@
         }
       ],
       "base_date": "1999-06-01",
-      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_services_sector.pdf (retrieved 2026-10-12)"
+      "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/ind_nifty_services_sector.pdf (retrieved 2026-10-12)",
+      "launch_date": "2015-09-22",
+      "launch_date_is_upper_bound": true
     },
     {
       "id": "rural",
@@ -1519,6 +1631,7 @@
         {
           "name": "Motilal Oswal Nifty MidSmall Healthcare Index Fund",
           "scheme_code": 153023,
+          "isin": "INF247L01EA7",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1529,6 +1642,7 @@
         {
           "name": "Tata Nifty MidSmall Healthcare Index Fund",
           "scheme_code": 152564,
+          "isin": "INF277KA1BG3",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1551,6 +1665,7 @@
         {
           "name": "Motilal Oswal Nifty MidSmall IT and Telecom Index Fund",
           "scheme_code": 153029,
+          "isin": "INF247L01DY9",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},
@@ -1584,6 +1699,7 @@
         {
           "name": "Edelweiss Nifty REITs & Realty Index Fund",
           "scheme_code": 154548,
+          "isin": "INF754K01XJ5",
           "exchange": "NSE",
           "aliases": [],
           "tracking": {},

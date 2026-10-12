@@ -10,6 +10,11 @@ download returned.
   lists one PDF per index). History before ``launch_date`` is back-calculated.
 * Vehicle ``inception_date`` — the first published NAV in AMFI's record for
   the scheme code, via MFAPI. A fund cannot be bought before it has a NAV.
+  The date is written only when the scheme's ISIN matches the vehicle's
+  recorded ``isin``, so a scheme code pointing at another fund is reported.
+* Legacy CNX-era indices leave Launch Date blank on their factsheets. Those
+  carry a hand-sourced ``launch_date`` with ``launch_date_is_upper_bound``,
+  which this tool keeps until a factsheet publishes an actual date.
 
 A date that cannot be parsed is left empty and reported, never guessed.
 
@@ -105,10 +110,14 @@ def factsheet_dates(url: str) -> tuple[date | None, date | None]:
     return launch, base
 
 
-def first_nav_date(code: int) -> date | None:
-    rows = _get(MFAPI.format(code=code)).json().get("data") or []
+def first_nav_date(code: int) -> tuple[date | None, set[str]]:
+    """(first NAV date, the scheme's ISINs) from AMFI's record via MFAPI."""
+    payload = _get(MFAPI.format(code=code)).json()
+    meta = payload.get("meta") or {}
+    isins = {meta.get(k) for k in ("isin_growth", "isin_div_reinvestment") if meta.get(k)}
+    rows = payload.get("data") or []
     dates = [datetime.strptime(r["date"], "%d-%m-%Y").date() for r in rows if r.get("date")]
-    return min(dates) if dates else None
+    return (min(dates) if dates else None), isins
 
 
 def main() -> int:
@@ -132,10 +141,13 @@ def main() -> int:
             problems.append(f"{exposure['id']}: no factsheet matches {names}")
         else:
             launch, base = factsheet_dates(url)
-            if launch is None or base is None:
+            bounded = exposure.get("launch_date_is_upper_bound", False)
+            if (launch is None and not bounded) or base is None:
                 problems.append(f"{exposure['id']}: could not read launch/base date from {url}")
             if launch:
+                # A published launch date supersedes a documented upper bound.
                 exposure["launch_date"] = launch.isoformat()
+                exposure.pop("launch_date_is_upper_bound", None)
             if base:
                 exposure["base_date"] = base.isoformat()
             if launch or base:
@@ -146,9 +158,17 @@ def main() -> int:
             if not code:
                 problems.append(f"{exposure['id']}/{vehicle.get('name')}: no scheme code")
                 continue
-            inception = first_nav_date(int(code))
+            inception, isins = first_nav_date(int(code))
             if inception is None:
                 problems.append(f"{exposure['id']}/{vehicle.get('name')}: MFAPI returned no NAV history")
+                continue
+            # A wrong scheme code yields some other fund's first NAV. The ISIN
+            # check is what stops that date from being written as this one's.
+            if not vehicle.get("isin") or vehicle["isin"] not in isins:
+                problems.append(
+                    f"{exposure['id']}/{vehicle.get('symbol') or vehicle.get('name')}: scheme {code} has "
+                    f"ISIN {sorted(isins) or 'none'}, not {vehicle.get('isin') or 'unrecorded'}; date not written"
+                )
                 continue
             vehicle["inception_date"] = inception.isoformat()
             vehicle["inception_source"] = (
