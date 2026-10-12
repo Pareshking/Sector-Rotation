@@ -2335,6 +2335,66 @@
       "launch_date": "2026-03-02",
       "base_date": "2021-07-01",
       "dates_source": "NSE Indices factsheet https://www.niftyindices.com/Factsheet/Factsheet_Nifty_REITs_and_Realty.pdf (retrieved 2026-10-12)"
+    },
+    {
+      "id": "insurance",
+      "name": "Insurance",
+      "category": "thematic",
+      "benchmark": "BSE Insurance",
+      "yfinance_symbol": null,
+      "etfs": [
+        {
+          "symbol": "INSUREIETF",
+          "name": "ICICI Prudential BSE Insurance ETF",
+          "scheme_code": 154503,
+          "isin": "INF109K1A567",
+          "yfinance_symbol": "INSUREIETF.NS",
+          "exchange": "NSE",
+          "inception_date": "2026-08-03",
+          "inception_source": "First published NAV in AMFI's record for scheme 154503, via MFAPI (retrieved 2026-10-12)"
+        },
+        {
+          "symbol": "INSURADD",
+          "name": "DSP BSE Insurance ETF",
+          "scheme_code": 154768,
+          "isin": "INF740KA1ZR8",
+          "yfinance_symbol": "INSURADD.NS",
+          "exchange": "NSE",
+          "inception_date": "2026-09-30",
+          "inception_source": "First published NAV in AMFI's record for scheme 154768, via MFAPI (retrieved 2026-10-12)"
+        }
+      ],
+      "launch_date": "2025-07-10",
+      "base_date": "2018-06-18",
+      "dates_source": "BSE Index Services index description https://www.bseindices.com/indices-details/code/154 (Launch Date, First Value Date; retrieved 2026-10-12)",
+      "index_provider": "bse",
+      "index_source_id": 154,
+      "index_code": "INSURE"
+    },
+    {
+      "id": "hospitals",
+      "name": "Hospitals",
+      "category": "thematic",
+      "benchmark": "BSE Hospitals",
+      "yfinance_symbol": null,
+      "etfs": [
+        {
+          "symbol": "GROWWHOSPI",
+          "name": "Groww BSE Hospitals ETF",
+          "scheme_code": 154199,
+          "isin": "INF666M01OD9",
+          "yfinance_symbol": "GROWWHOSPI.NS",
+          "exchange": "NSE",
+          "inception_date": "2026-03-04",
+          "inception_source": "First published NAV in AMFI's record for scheme 154199, via MFAPI (retrieved 2026-10-12)"
+        }
+      ],
+      "launch_date": "2025-10-03",
+      "base_date": "2017-06-19",
+      "dates_source": "BSE Index Services index description https://www.bseindices.com/indices-details/code/158 (Launch Date, First Value Date; retrieved 2026-10-12)",
+      "index_provider": "bse",
+      "index_source_id": 158,
+      "index_code": "BSHOSP"
     }
   ]
 }

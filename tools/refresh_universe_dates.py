@@ -136,8 +136,13 @@ def main() -> int:
 
     for exposure in universe["exposures"]:
         names = [exposure["benchmark"], resolved.get(exposure["id"], "")]
-        url = next((links[_norm(n)] for n in names if n and _norm(n) in links), None)
-        if url is None:
+        # NSE's factsheets cover Nifty indices only. A BSE index keeps the dates
+        # recorded by hand from BSE Index Services' index description.
+        is_nse = exposure.get("index_provider", "nse") == "nse"
+        url = next((links[_norm(n)] for n in names if n and _norm(n) in links), None) if is_nse else None
+        if not is_nse:
+            print(f"{exposure['id']:28s} {exposure['index_provider'].upper()} index: dates kept as recorded")
+        elif url is None:
             problems.append(f"{exposure['id']}: no factsheet matches {names}")
         else:
             launch, base = factsheet_dates(url)

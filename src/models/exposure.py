@@ -4,12 +4,23 @@ from datetime import date
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ExposureCategory(str, Enum):
     SECTOR = "sector"
     THEMATIC = "thematic"
+
+
+class IndexProvider(str, Enum):
+    """Who calculates the exposure's index, and so where its history is fetched.
+
+    NSE (Nifty) indices come from NSE / NiftyIndices via jugaad-data; BSE
+    indices from BSE Index Services. Defaults to NSE.
+    """
+
+    NSE = "nse"
+    BSE = "bse"
 
 
 class TrackingMetrics(BaseModel):
@@ -77,8 +88,9 @@ class Exposure(BaseModel):
     benchmark: str = Field(min_length=1)
     yfinance_symbol: Optional[str] = None
     etfs: list[ETFMapping] = Field(default_factory=list)
-    # From the NSE Indices factsheet. History before launch_date is
-    # back-calculated: NSE computed it after the fact, nobody could trade it.
+    # From the index provider's own record (the NSE Indices factsheet, or BSE
+    # Index Services' index description). History before launch_date is
+    # back-calculated: the provider computed it after the fact, nobody could trade it.
     launch_date: Optional[date] = None
     # True when NSE publishes no launch date and launch_date is only the latest
     # day the index is documented as live. Masking from it is conservative: it
@@ -86,6 +98,20 @@ class Exposure(BaseModel):
     launch_date_is_upper_bound: bool = False
     base_date: Optional[date] = None
     dates_source: Optional[str] = None
+    index_provider: IndexProvider = IndexProvider.NSE
+    # BSE only: BSE Index Services' numeric id for the index (its
+    # /indices-details/code/<id> page) and the BSE index code its data must
+    # carry. An NSE index is fetched by ``benchmark`` and needs neither.
+    index_source_id: Optional[int] = Field(default=None, gt=0)
+    index_code: Optional[str] = Field(default=None, pattern=r"^[A-Z0-9]{2,20}$")
+
+    @model_validator(mode="after")
+    def _provider_identifiers(self) -> "Exposure":
+        if self.index_provider is IndexProvider.BSE and (self.index_source_id is None or not self.index_code):
+            raise ValueError("a BSE index needs index_source_id and index_code")
+        if self.index_provider is IndexProvider.NSE and (self.index_source_id is not None or self.index_code):
+            raise ValueError("index_source_id and index_code apply to BSE indices only")
+        return self
 
     @property
     def is_sector(self) -> bool:
