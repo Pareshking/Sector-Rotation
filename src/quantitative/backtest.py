@@ -1,52 +1,57 @@
-"""Monthly rotation backtest against Nifty 50.
+"""Walk-forward backtest of the strategy the dashboard shows.
 
-Deliberate design choices, because a backtest that flatters itself is worse
-than none at all:
+Every selection and weighting decision is made by
+``src.portfolio.construct.construct_target_portfolio`` through
+``decision_chain`` — the same chain that produces the live target — so the
+backtest has no rules of its own to drift out of sync. This module only does
+the accounting:
 
-* Ranking at each rebalance date uses ``rank_exposures`` — the *same* function
-  the live dashboard uses — over a price slice that ends on that date. There is
-  no separate research implementation to drift out of sync, and no future data
-  in the ranking.
-* An exposure is only selectable if every lookback window it is scored on is
-  fully populated at that date. Otherwise a freshly launched index would be
-  ranked on 1-month momentum alone and compared against names scored on four
-  horizons.
-* The holding period return is measured from the rebalance close to the next
-  rebalance close, so the decision and the return it earns never overlap.
-* Unallocated capital earns the risk-free rate (``RISK_FREE_ANNUAL``, 6.5% a
-  year), the same assumption the Sharpe and Sortino figures use. Indian liquid
-  funds pay roughly that; leaving cash at 0% was not conservative — with 40%
-  of slot-months in cash it decided the sign of the investable result.
-* Only completed months are periods. The current, unfinished month is not a
-  rebalance date unless ``include_partial`` asks for it, and annualisation
+* **Signal at t, fill at t+1.** A decision formed at the month-end close is
+  executed at the next session's close (``execution_fill: t_plus_1_close``).
+  The old portfolio earns the session in between, and each period runs from
+  one fill to the next.
+* **Costs.** ``cost_bps_per_side`` is charged on every unit of weight bought
+  or sold (cash legs are free): ``cost = bps x sum_i |w_i - w_prior_i|``,
+  deducted at the fill.
+* **Cash** earns the risk-free rate — the same rate as the cash hurdle and the
+  Sharpe ratio.
+* **Only completed months are periods.** The current, unfinished month is not
+  a rebalance date unless ``include_partial`` asks for it, and annualisation
   uses the trading sessions actually covered.
-* Turnover is ``0.5 * sum(|w_t - w_{t-1}|)`` over every holding *and* cash, so
-  moving a slot into or out of cash counts at its full size.
+* **Turnover** is ``0.5 * sum(|w_t - w_{t-1}|)`` over every holding *and*
+  cash, against the previous target.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Mapping
 
 import numpy as np
 import pandas as pd
 
-from src.quantitative.analytics import RISK_FREE_ANNUAL
-from src.quantitative.ranking import rank_exposures
-from src.quantitative.relative_strength import (
-    mansfield_relative_strength,
-    rs_momentum,
-    rs_stage,
-)
-from src.quantitative.returns import LOOKBACK_DAYS
+from src.config import StrategyConfig, load_strategy_config
+from src.portfolio.calendar import fill_date, month_is_complete, rebalance_dates
+from src.portfolio.construct import CASH, TargetPortfolio, decision_chain
+from src.portfolio.score import FFILL_LIMIT
+from src.portfolio.universe import ExposureMeta
+
+__all__ = [
+    "CASH",
+    "BacktestResult",
+    "month_is_complete",
+    "period_split",
+    "rebalance_dates",
+    "rolling_summary_stats",
+    "rolling_windows",
+    "run_backtest",
+    "traded_weight",
+    "turnover",
+    "weight_sensitivity",
+]
 
 TRADING_DAYS = 252
 MIN_WINDOW_MONTHS = 12
-# How far down the ranking a substitution may reach when the top name cannot be
-# bought. Beyond this the slot goes to cash rather than drifting into names the
-# model never actually favoured.
-DEFAULT_RANK_DEPTH = 3
-CASH = "__cash__"
 
 
 @dataclass
@@ -55,141 +60,63 @@ class BacktestResult:
     equity: pd.DataFrame = field(default_factory=pd.DataFrame)
     stats: dict[str, float] = field(default_factory=dict)
     universe_size: pd.Series = field(default_factory=lambda: pd.Series(dtype=int))
+    decisions: list[TargetPortfolio] = field(default_factory=list)
     error: str = ""
 
     @property
     def ok(self) -> bool:
         return not self.error and not self.monthly.empty
 
+    @property
+    def final_target(self) -> TargetPortfolio | None:
+        """The latest decision: what the strategy holds from its next fill onwards."""
+        return self.decisions[-1] if self.decisions else None
 
-def month_is_complete(last_session: pd.Timestamp) -> bool:
-    """Whether the newest session in the data closes its calendar month.
 
-    True once the data reaches the month's last weekday. When that weekday is
-    an NSE holiday the month is treated as unfinished until the next month's
-    first session arrives — a day late, never early.
+def turnover(previous: Mapping[str, float], current: Mapping[str, float]) -> float:
+    """One-way turnover, ``0.5 * sum(|w_t - w_{t-1}|)``, with cash as a position.
+
+    {A, B} -> {A, cash} sells half the book: 0.5.
     """
-    stamp = pd.Timestamp(last_session).normalize()
-    return stamp >= (stamp + pd.offsets.BMonthEnd(0)).normalize()
+    keys = set(previous) | set(current)
+    return 0.5 * sum(abs(current.get(k, 0.0) - previous.get(k, 0.0)) for k in keys)
 
 
-def rebalance_dates(
-    index: pd.DatetimeIndex, months: int, hold_months: int = 1, include_partial: bool = False
-) -> list[pd.Timestamp]:
-    """Period boundaries: the last trading day of every ``hold_months``-th month.
-
-    ``months`` is the length of the test; ``hold_months`` is how long a decision
-    is left alone before it is revisited. The newest month counts only once it
-    is complete: mid-October, "the October month end" is just the latest
-    close, and treating it as one adds a seven-session period that is then
-    annualised as a full month. ``include_partial`` keeps it, explicitly.
-    """
-    if len(index) == 0:
-        return []
-    frame = pd.Series(index, index=index)
-    month_ends = frame.groupby([index.year, index.month]).max().sort_values()
-    dates = list(pd.DatetimeIndex(month_ends.to_numpy()))
-    if dates and not include_partial and not month_is_complete(dates[-1]):
-        dates = dates[:-1]
-    window = dates[-(months + 1):] if len(dates) > months else dates
-    hold = max(int(hold_months), 1)
-    if hold == 1:
-        return window
-    # Step backwards from the most recent month end so the final period is whole.
-    stepped = window[::-1][::hold][::-1]
-    return stepped
+def traded_weight(previous: Mapping[str, float], current: Mapping[str, float]) -> float:
+    """Weight bought plus weight sold, cash leg excluded: what costs are charged on."""
+    keys = (set(previous) | set(current)) - {CASH}
+    return sum(abs(current.get(k, 0.0) - previous.get(k, 0.0)) for k in keys)
 
 
-def signal_panel(prices: pd.DataFrame, benchmark: pd.Series) -> dict[str, pd.DataFrame]:
-    """Mansfield RS ratio and velocity for every date, per exposure.
-
-    Both inputs are backward-looking by construction — a 52-week rolling mean
-    and a 13-week difference — so reading row ``t`` uses only data available on
-    day ``t``. Computing the series once and indexing into it is point-in-time
-    safe and far cheaper than recomputing at every rebalance.
-    """
-    out: dict[str, pd.DataFrame] = {}
-    for column in prices.columns:
-        mrs = mansfield_relative_strength(prices[column], benchmark)
-        if mrs.dropna().empty:
-            continue
-        frame = pd.DataFrame({"ratio": 1.0 + mrs / 100.0, "velocity": rs_momentum(mrs)}).dropna()
-        if not frame.empty:
-            out[column] = frame
-    return out
-
-
-def _signal_at(panel: dict[str, pd.DataFrame], exposure_id: str, asof: pd.Timestamp):
-    frame = panel.get(exposure_id)
-    if frame is None:
-        return None
-    window = frame.loc[:asof]
-    if window.empty:
-        return None
-    row = window.iloc[-1]
-    return float(row["ratio"]), float(row["velocity"])
-
-
-def investable_from(
-    vehicle_prices: pd.DataFrame, vehicles_by_exposure: dict[str, list[str]] | None
-) -> dict[str, pd.Timestamp]:
-    """First date each exposure had a vehicle you could actually have bought.
-
-    Investability is judged from the vehicle's own price history, not from the
-    fact that it exists today. Most of these ETFs and index funds launched in
-    2024-25; treating them as available in 2021 would be look-ahead of the worst
-    kind — the backtest would buy instruments that did not exist yet.
-    """
-    starts: dict[str, pd.Timestamp] = {}
-    if vehicle_prices is None or vehicle_prices.empty:
-        return starts
-    for exposure_id, keys in (vehicles_by_exposure or {}).items():
-        firsts = [
-            vehicle_prices[key].dropna().index.min()
-            for key in keys
-            if key in vehicle_prices.columns and not vehicle_prices[key].dropna().empty
-        ]
-        if firsts:
-            starts[str(exposure_id)] = min(firsts)
-    return starts
-
-
-def _eligible(prices: pd.DataFrame, asof: pd.Timestamp) -> list[str]:
-    """Exposures with enough history at ``asof`` to be scored on every lookback."""
-    needed = max(LOOKBACK_DAYS.values())
-    window = prices.loc[:asof]
-    return [column for column in window.columns if window[column].dropna().size > needed]
+def _passed_over(target: TargetPortfolio, depth: int) -> str:
+    ranking = target.ranking
+    if ranking.empty or "rank" not in ranking:
+        return ""
+    held = set(target.holdings)
+    ranked = ranking[ranking["rank"].notna()]
+    ranked = ranked[ranked["rank"].astype(int) <= depth]
+    parts = [f"{e}:{status}" for e, status in zip(ranked.index, ranked["status"]) if e not in held]
+    return "; ".join(parts[:4])
 
 
 def run_backtest(
     prices: pd.DataFrame,
     benchmark: pd.Series,
-    top_n: int = 2,
-    months: int = 12,
-    hold_months: int = 1,
-    absolute_filter: bool = True,
-    absolute_lookback: str = "12M",
-    investable_only: bool = False,
-    require_buy: bool = False,
-    max_rank_depth: int = DEFAULT_RANK_DEPTH,
-    vehicle_prices: pd.DataFrame | None = None,
-    vehicles_by_exposure: dict[str, list[str]] | None = None,
-    weights: dict[str, float] | None = None,
-    cash_rate: float = RISK_FREE_ANNUAL,
+    config: StrategyConfig | None = None,
+    universe_metadata: Mapping[str, ExposureMeta] | None = None,
+    months: int | None = None,
     include_partial: bool = False,
 ) -> BacktestResult:
-    """Rank periodically, hold the top ``top_n`` exposures equally weighted.
+    """Replay the strategy over the panel and account for what it would have earned.
 
-    ``investable_only`` restricts each pick to exposures that had a buyable
-    vehicle *on that date*, judged from the vehicle's own price history rather
-    than from the fact that it exists today. ``require_buy`` additionally
-    demands the exposure satisfy the live BUY rule. When a top-ranked name
-    fails either test the next one is taken, but never past ``max_rank_depth``
-    — beyond that the slot goes to cash rather than drifting into names the
-    model never favoured. A cash slot earns ``cash_rate`` a year.
+    ``months`` limits the history window; ``None`` uses every completed month,
+    which is what the live portfolio does. When ``config.require_investable``
+    is set, ``universe_metadata`` says from when each exposure was buyable; an
+    exposure absent from it never is.
     """
-    hold_months = max(int(hold_months), 1)
-    if months < MIN_WINDOW_MONTHS:
+    config = config or load_strategy_config()
+    hold_months = int(config.rebalance_months)
+    if months is not None and months < MIN_WINDOW_MONTHS:
         return BacktestResult(error=f"The backtest window must be at least {MIN_WINDOW_MONTHS} months.")
     if prices is None or prices.empty or benchmark is None or benchmark.dropna().empty:
         return BacktestResult(error="No canonical index price panel is available.")
@@ -198,6 +125,8 @@ def run_backtest(
     benchmark = benchmark.dropna().sort_index()
     common = prices.index.intersection(benchmark.index)
     prices, benchmark = prices.loc[common], benchmark.loc[common]
+    if prices.empty:
+        return BacktestResult(error="No canonical index price panel is available.")
 
     dates = rebalance_dates(prices.index, months, hold_months, include_partial=include_partial)
     periods_needed = max(MIN_WINDOW_MONTHS // hold_months, 1)
@@ -209,127 +138,88 @@ def run_backtest(
             )
         )
 
-    signals = signal_panel(prices, benchmark) if require_buy else {}
-    starts = (
-        investable_from(vehicle_prices, vehicles_by_exposure) if investable_only else {}
-    )
-    absolute_days = LOOKBACK_DAYS.get(absolute_lookback, LOOKBACK_DAYS["12M"])
-    # The depth cap exists so a name the model never favoured cannot be bought
-    # just because everything above it was unbuyable. It applies only to the
-    # constrained modes; plain full-universe scanning is unbounded, as before.
-    constrained = investable_only or require_buy
-    depth = max(int(max_rank_depth), int(top_n)) if constrained else len(prices.columns)
+    chain = decision_chain(prices, universe_metadata, config, dates)
+    marks = prices.ffill(limit=FFILL_LIMIT)
+    index = prices.index
+    last_session = pd.Timestamp(index[-1])
+    rate = float(config.risk_free_rate_annual)
+    bps = float(config.cost_bps_per_side) / 1e4
 
     rows: list[dict[str, object]] = []
     universe: dict[pd.Timestamp, int] = {}
-    # The book starts entirely in cash, so the first rebalance is a full buy.
-    previous: dict[str, float] = {CASH: 1.0}
-    last_is_partial = include_partial and not month_is_complete(prices.index[-1])
-
-    for start, end in zip(dates[:-1], dates[1:]):
-        candidates = _eligible(prices, start)
-        universe[start] = len(candidates)
-        if not candidates:
+    prior: Mapping[str, float] = {CASH: 1.0}
+    for k, target in enumerate(chain):
+        signal = pd.Timestamp(dates[k])
+        universe[signal] = target.eligible_count
+        weights = target.weights
+        period_turnover = turnover(prior, weights)
+        cost = bps * traded_weight(prior, weights)
+        prior = weights
+        if target.eligible_count == 0 or k + 1 >= len(chain):
+            # Warm-up (nothing has a full 12-month history yet), or the latest
+            # decision, whose holding period has not run yet.
             continue
 
-        window = prices.loc[:start, candidates]
-        ranked = rank_exposures(window, benchmark.loc[:start], weights=weights)
-        ranked = ranked[ranked["momentum_z"].notna()].sort_values("momentum_z", ascending=False)
+        start = fill_date(index, signal)
+        end = fill_date(index, pd.Timestamp(dates[k + 1]))
+        partial = False
+        if end is None and include_partial:
+            end, partial = last_session, True
+        if start is None or end is None or end <= start:
+            continue
 
-        picks: list[str] = []
-        skipped: list[str] = []
-        for position, (exposure_id, momentum) in enumerate(ranked["momentum_z"].items(), start=1):
-            if len(picks) >= top_n or position > depth:
-                break
-            exposure_id = str(exposure_id)
-            series = prices[exposure_id].loc[:start].dropna()
-
-            if investable_only:
-                first = starts.get(exposure_id)
-                if first is None or first > start:
-                    skipped.append(f"{exposure_id}:no vehicle")
-                    continue
-
-            if require_buy:
-                signal = _signal_at(signals, exposure_id, start)
-                if signal is None:
-                    skipped.append(f"{exposure_id}:no signal")
-                    continue
-                ratio, velocity = signal
-                stage = rs_stage(ratio, velocity)
-                # The live BUY rule in full (app/components/metrics.py): Leading,
-                # RS ratio > 1, RS velocity > 0 *and* momentum Z > 0.
-                if not (stage == "Leading" and ratio > 1.0 and velocity > 0 and momentum > 0):
-                    skipped.append(f"{exposure_id}:not BUY")
-                    continue
-
-            if absolute_filter:
-                if len(series) <= absolute_days:
-                    skipped.append(f"{exposure_id}:short history")
-                    continue
-                trailing = series.iloc[-1] / series.iloc[-absolute_days - 1] - 1.0
-                if trailing <= 0:
-                    skipped.append(f"{exposure_id}:negative absolute")
-                    continue
-
-            picks.append(exposure_id)
-
-        held = prices.loc[[start, end], picks] if picks else pd.DataFrame()
-        realised = {}
-        for exposure_id in picks:
-            values = held[exposure_id]
-            if values.isna().any() or values.iloc[0] <= 0:
-                continue
-            realised[exposure_id] = float(values.iloc[1] / values.iloc[0] - 1.0)
-
-        cash_slots = top_n - len(realised)
-        cash_weight = cash_slots / top_n if top_n else 1.0
-        period_years = (
-            (end - start).days / 365.25
-            if last_is_partial and end == dates[-1]
-            else hold_months / 12.0
-        )
-        cash_return = (1.0 + cash_rate) ** period_years - 1.0
-        strategy_return = (
-            (sum(realised.values()) / top_n if top_n else 0.0) + cash_weight * cash_return
-        )
-        current = {exposure_id: 1.0 / top_n for exposure_id in realised}
-        if cash_weight > 0:
-            current[CASH] = cash_weight
-
-        bench_start, bench_end = benchmark.loc[start], benchmark.loc[end]
+        period_years = (end - start).days / 365.25 if partial else hold_months / 12.0
+        cash_return = (1.0 + rate) ** period_years - 1.0
+        realised: dict[str, float] = {}
+        missing: list[str] = []
+        for exposure_id in target.holdings:
+            a, b = marks.at[start, exposure_id], marks.at[end, exposure_id]
+            if pd.isna(a) or pd.isna(b) or a <= 0:
+                missing.append(exposure_id)
+                realised[exposure_id] = 0.0
+            else:
+                realised[exposure_id] = float(b / a - 1.0)
+        cash_weight = float(weights.get(CASH, 0.0))
+        gross = sum(weights[e] * r for e, r in realised.items()) + cash_weight * cash_return
+        net = (1.0 - cost) * (1.0 + gross) - 1.0
+        bench_start, bench_end = benchmark.at[start], benchmark.at[end]
         benchmark_return = float(bench_end / bench_start - 1.0) if bench_start > 0 else np.nan
+        skipped = _passed_over(target, int(config.retention_buffer_m))
+        if missing:
+            skipped = "; ".join(filter(None, [skipped, *(f"{e}:no price at fill" for e in missing)]))
 
         rows.append(
             {
-                "rebalance": start,
+                "rebalance": signal,
+                "fill_date": start,
                 "period_end": end,
-                "holdings": ", ".join(realised) if realised else "cash",
-                "n_held": len(realised),
-                "cash_slots": cash_slots,
+                "holdings": ", ".join(target.holdings) if target.holdings else "cash",
+                "n_held": len(target.holdings),
                 "cash_weight": cash_weight,
+                "cash_slots": int(round(cash_weight * config.target_holdings_n)),
                 "cash_return": cash_return,
-                "strategy_return": strategy_return,
+                "gross_return": gross,
+                "cost": cost,
+                "strategy_return": net,
                 "benchmark_return": benchmark_return,
-                "excess_return": strategy_return - benchmark_return,
-                "turnover": turnover(previous, current),
-                "universe": len(candidates),
-                "skipped": "; ".join(skipped[:4]),
+                "excess_return": net - benchmark_return,
+                "turnover": period_turnover,
+                "universe": target.eligible_count,
+                "skipped": skipped,
                 **{f"holding_{i + 1}": name for i, name in enumerate(realised)},
                 **{f"holding_{i + 1}_return": value for i, value in enumerate(realised.values())},
             }
         )
-        previous = current
 
     monthly = pd.DataFrame(rows)
     if monthly.empty:
-        return BacktestResult(error="No period produced a valid holding.")
+        return BacktestResult(error="No period produced a valid holding.", decisions=chain)
 
-    # The curve starts at the first invested rebalance, not at the start of the
-    # warm-up year in which nothing could be held.
+    # The curve starts at the first fill, not at the start of the warm-up year
+    # in which nothing could be held.
     equity = pd.DataFrame(
         {
-            "date": [monthly["rebalance"].iloc[0]] + monthly["period_end"].tolist(),
+            "date": [monthly["fill_date"].iloc[0]] + monthly["period_end"].tolist(),
             "strategy": np.concatenate([[100.0], 100.0 * (1 + monthly["strategy_return"]).cumprod()]),
             "benchmark": np.concatenate(
                 [[100.0], 100.0 * (1 + monthly["benchmark_return"]).cumprod()]
@@ -337,35 +227,34 @@ def run_backtest(
         }
     ).set_index("date")
 
-    first = pd.Timestamp(monthly["rebalance"].iloc[0])
+    first = pd.Timestamp(monthly["fill_date"].iloc[0])
     last = pd.Timestamp(monthly["period_end"].iloc[-1])
-    sessions = int(((prices.index > first) & (prices.index <= last)).sum())
-    stats = _stats(monthly, equity, hold_months, sessions=sessions)
-    stats["cash_rate"] = float(cash_rate)
-    stats["requested_months"] = float(months)
-    # The first rebalances produce nothing: no exposure has the 252 days of
-    # history the ranking needs, so the window's opening year is warm-up.
-    stats["warmup_months"] = float(max(months - stats["months"], 0.0))
+    sessions = int(((index > first) & (index <= last)).sum())
+    stats = _stats(monthly, equity, hold_months, sessions=sessions, risk_free=rate)
+    requested = float(months) if months is not None else float((len(dates) - 1) * hold_months)
+    stats["requested_months"] = requested
+    stats["warmup_months"] = float(max(requested - stats["months"], 0.0))
+    stats["cash_rate"] = rate
+    stats["cost_bps_per_side"] = float(config.cost_bps_per_side)
+    stats["gross_total_return"] = float((1 + monthly["gross_return"]).prod() - 1.0)
+    stats["total_cost"] = float(monthly["cost"].sum())
     return BacktestResult(
         monthly=monthly,
         equity=equity,
         stats=stats,
         universe_size=pd.Series(universe).sort_index(),
+        decisions=chain,
     )
-
-
-def turnover(previous: dict[str, float], current: dict[str, float]) -> float:
-    """One-way turnover, ``0.5 * sum(|w_t - w_{t-1}|)``, with cash as a position.
-
-    {A, B} -> {A, cash} sells half the book: 0.5. Counting only the names that
-    changed, as before, called it 0.25.
-    """
-    keys = set(previous) | set(current)
-    return 0.5 * sum(abs(current.get(k, 0.0) - previous.get(k, 0.0)) for k in keys)
 
 
 def _max_drawdown(curve: pd.Series) -> float:
     return float((curve / curve.cummax() - 1.0).min())
+
+
+def _sharpe(growth: float, volatility: float, risk_free: float) -> float:
+    if not np.isfinite(growth) or not np.isfinite(volatility) or volatility <= 0:
+        return float("nan")
+    return float((growth - risk_free) / volatility)
 
 
 def _stats(
@@ -373,14 +262,13 @@ def _stats(
     equity: pd.DataFrame,
     hold_months: int = 1,
     sessions: int | None = None,
-    risk_free: float = RISK_FREE_ANNUAL,
+    risk_free: float = 0.065,
 ) -> dict[str, float]:
     """Summary statistics over the periods that actually held something.
 
     CAGR is annualised by the trading sessions covered (``sessions / 252``)
-    rather than by counting periods, so a short period cannot pass for a full
-    one. Sharpe is ``(CAGR - rf) / annualised volatility`` with the same
-    risk-free rate as ``analytics.sharpe``.
+    rather than by counting periods. Sharpe is ``(CAGR - rf) / annualised
+    volatility``, the same definition as ``analytics.sharpe``.
     """
     strategy = monthly["strategy_return"].astype(float)
     benchmark = monthly["benchmark_return"].astype(float)
@@ -416,14 +304,8 @@ def _stats(
         "best_month": float(strategy.max()),
         "worst_month": float(strategy.min()),
         "avg_turnover": float(monthly["turnover"].mean()),
-        "cash_months": float((monthly["cash_slots"] > 0).sum()),
+        "cash_months": float((monthly["cash_weight"] > 0).sum()),
     }
-
-
-def _sharpe(growth: float, volatility: float, risk_free: float) -> float:
-    if not np.isfinite(growth) or not np.isfinite(volatility) or volatility <= 0:
-        return float("nan")
-    return float((growth - risk_free) / volatility)
 
 
 def period_split(result: BacktestResult, boundary: str = "2025-01-01") -> pd.DataFrame:
@@ -453,7 +335,7 @@ def period_split(result: BacktestResult, boundary: str = "2025-01-01") -> pd.Dat
                 "strategy": strategy,
                 "benchmark": bench,
                 "excess": strategy - bench,
-                "cash_periods": float((group["cash_slots"] > 0).mean()),
+                "cash_periods": float((group["cash_weight"] > 0).mean()),
                 "avg_universe": float(group["universe"].mean()),
             }
         )
@@ -464,18 +346,19 @@ def period_split(result: BacktestResult, boundary: str = "2025-01-01") -> pd.Dat
 def weight_sensitivity(
     prices: pd.DataFrame,
     benchmark: pd.Series,
-    schemes: dict[str, dict[str, float]],
-    **kwargs,
+    schemes: Mapping[str, StrategyConfig],
+    universe_metadata: Mapping[str, ExposureMeta] | None = None,
+    months: int | None = None,
 ) -> pd.DataFrame:
-    """Run the same test under several weightings.
+    """Run the same test under several score specifications.
 
-    If the answer swings wildly across reasonable weightings, the result is a
-    property of the parameter rather than of the strategy — and picking the best
-    row is fitting noise. This exists to make that visible, not to choose.
+    If the answer swings wildly across reasonable choices, the result is a
+    property of the parameter rather than of the strategy — and picking the
+    best row is fitting noise. This exists to make that visible, not to choose.
     """
     rows = []
-    for label, weights in schemes.items():
-        result = run_backtest(prices, benchmark, weights=weights, **kwargs)
+    for label, config in schemes.items():
+        result = run_backtest(prices, benchmark, config, universe_metadata, months=months)
         if not result.ok:
             continue
         rows.append(
@@ -496,8 +379,7 @@ def rolling_windows(result: BacktestResult, window: int = 12) -> pd.DataFrame:
 
     One 48-month number depends entirely on when the test started and stopped.
     The distribution of every 12-month window inside it says how often the
-    strategy actually worked — the same treatment the Durability panel gives an
-    exposure, applied to the strategy itself.
+    strategy actually worked.
     """
     if not result.ok or len(result.monthly) < window:
         return pd.DataFrame()
@@ -514,7 +396,7 @@ def rolling_windows(result: BacktestResult, window: int = 12) -> pd.DataFrame:
                 "strategy": strategy,
                 "benchmark": bench,
                 "excess": strategy - bench,
-                "cash_periods": float((chunk["cash_slots"] > 0).mean()),
+                "cash_periods": float((chunk["cash_weight"] > 0).mean()),
             }
         )
     return pd.DataFrame(rows)

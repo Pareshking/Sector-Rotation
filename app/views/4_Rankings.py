@@ -33,7 +33,7 @@ rs = load_rs()
 section("Filters")
 row1 = st.columns([1.1, 1.1, 1.3])
 categories = sorted(decisions.category.dropna().unique().tolist())
-actions = ["BUY", "WATCH / IMPROVING", "WATCH", "REDUCE / EXIT", "DATA UNAVAILABLE"]
+actions = ["BUY", "HOLD", "TRIM", "SELL", "NOT HELD", "DATA UNAVAILABLE"]
 stages = ["Leading", "Weakening", "Lagging", "Improving"]
 
 picked_categories = row1[0].multiselect("Universe", categories, default=categories)
@@ -49,7 +49,8 @@ period = row2[1].segmented_control(
     ["Composite", "1M", "3M", "6M", "12M"],
     default="Composite",
     key="screener_lookback",
-    help="Composite blends the cross-sectional Z-scores of all four horizons.",
+    help="Composite is the strategy score: weighted z-scores of the non-overlapping 1M, 3M-1M, "
+    "6M-3M and 12M-6M returns, as of the latest session.",
 )
 row3 = st.columns([1.3, 1.4, 1.1])
 basis = row3[0].segmented_control(
@@ -62,8 +63,8 @@ basis = row3[0].segmented_control(
 )
 only_grade = row2[2].toggle("Decision-grade only", value=True, key="screener_grade")
 only_tradeable = row3[2].toggle(
-    "Tradeable only", value=False, key="screener_tradeable",
-    help="Keep only exposures with a listed ETF that traded at the last NSE snapshot.",
+    "Buyable only", value=False, key="screener_tradeable",
+    help="Keep only exposures with a mapped ETF or index fund that had a price on the decision date.",
 )
 
 frame = decisions[decisions.category.isin(picked_categories)]
@@ -85,17 +86,17 @@ if frame.empty:
 kpi_strip(
     [
         ("Matching", len(frame), f"of {len(decisions)} exposures", ""),
-        ("Buy", int((frame.model_action == "BUY").sum()), "in this selection", "buy"),
         (
-            "Reduce / exit",
-            int((frame.model_action == "REDUCE / EXIT").sum()),
+            "In the portfolio",
+            int(frame.model_action.isin(["BUY", "HOLD", "TRIM"]).sum()),
             "in this selection",
-            "red",
+            "buy",
         ),
+        ("Sell", int((frame.model_action == "SELL").sum()), "in this selection", "red"),
         (
-            "Tradeable",
+            "Buyable",
             int(frame.tradeable.sum()) if "tradeable" in frame else "—",
-            "have a listed ETF",
+            "a fund had a price on the decision date",
             "",
         ),
         (

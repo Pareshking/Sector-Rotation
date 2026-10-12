@@ -18,7 +18,9 @@ from src.data.index_data import download_benchmark, download_canonical_indices
 from src.data.nse_etf import fetch_etf_snapshot, merge_snapshot
 from src.quantitative.analytics import analyse_exposure
 from src.quantitative.quality import check_dataset
-from src.quantitative.ranking import normalise_weights, rank_exposures
+from src.config import load_strategy_config
+from src.portfolio.score import score_exposures
+from src.quantitative.ranking import rank_exposures
 from src.quantitative.relative_strength import (
     mansfield_relative_strength,
     rs_momentum,
@@ -336,7 +338,12 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
     )
 
     _stage("Ranking and computing durability analytics...")
-    rankings = rank_exposures(prices, benchmark, weights=registry.momentum_weights)
+    # Absolute and relative returns per horizon, for display. The rank and score
+    # are the strategy's own (src/config/strategy.json) as of the latest session,
+    # so the board ranks on exactly what the portfolio is built from.
+    strategy = load_strategy_config()
+    rankings = rank_exposures(prices, benchmark)
+    board = score_exposures(prices, prices.index.max(), strategy)
     summary_rows = []
     rs_series = {}
     for exposure in registry.all():
@@ -368,8 +375,8 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
                 "rs_ratio": latest_ratio,
                 "rs_momentum": latest_momentum,
                 "stage": rs_stage(latest_ratio, latest_momentum),
-                "momentum_z": rank_row["momentum_z"],
-                "rank": rank_row["rank"],
+                "momentum_z": board.at[exposure.id, "score"],
+                "rank": board.at[exposure.id, "universe_rank"],
                 **{
                     f"return_{label}": rank_row[f"return_{label}"]
                     for label in ("1M", "3M", "6M", "12M")
@@ -383,7 +390,10 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
         )
 
     _stage("Writing outputs and running quality checks...")
-    summary = pd.DataFrame(summary_rows).sort_values("rank")
+    summary = pd.DataFrame(summary_rows)
+    summary["rank"] = summary["rank"].astype("Int64")
+    summary["momentum_z"] = summary["momentum_z"].astype(float)
+    summary = summary.sort_values("rank", na_position="last", kind="mergesort")
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_parquet(summary, OUTPUT / "summary_rankings.parquet")
     write_parquet(pd.DataFrame(rs_series).sort_index(), OUTPUT / "rs_matrix.parquet")
@@ -404,7 +414,9 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
         "mode": mode,
         "etf_ingestion": "reused" if (mode == "live" and skip_etf) else "refreshed",
         "benchmark": registry.benchmark_name,
-        "momentum_weights": normalise_weights(registry.momentum_weights),
+        "strategy_version": strategy.version,
+        "strategy_hash": strategy.config_hash,
+        "strategy": strategy.model_dump(mode="json"),
         "last_updated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "observations": int(len(prices)),
         "valid_series": int(prices.shape[1]),

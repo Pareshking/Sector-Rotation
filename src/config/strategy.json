@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "description": "Monthly sector and theme rotation. Rank by a non-overlapping momentum composite that keeps the most recent month at full weight; hold the top 2 with a retention buffer at rank 4; hold an exposure only while its 12-month return beats cash; trade the session after the signal; charge 25 bps per side.",
+  "target_holdings_n": 2,
+  "retention_buffer_m": 4,
+  "rebalance_months": 1,
+  "score_weights": {
+    "method": "segment_composite",
+    "segments": {
+      "1M": 0.25,
+      "3M-1M": 0.25,
+      "6M-3M": 0.25,
+      "12M-6M": 0.25
+    },
+    "vol_adjusted": {
+      "return_lookback_days": 252,
+      "ewma_span_days": 126
+    }
+  },
+  "absolute_momentum_filter": "dual_momentum_cash_hurdle",
+  "risk_free_rate_annual": 0.065,
+  "require_investable": true,
+  "execution_fill": "t_plus_1_close",
+  "cost_bps_per_side": 25
+}

@@ -26,11 +26,13 @@ STAGE_COLORS = {
     "Insufficient Data": "#94A3B8",
 }
 
+# Target-portfolio actions (src/portfolio/construct.py), never RRG labels.
 ACTION_CLASS = {
     "BUY": "buy",
-    "REDUCE / EXIT": "red",
-    "WATCH / IMPROVING": "blue",
-    "WATCH": "slate",
+    "HOLD": "blue",
+    "TRIM": "amber",
+    "SELL": "red",
+    "NOT HELD": "slate",
     "DATA UNAVAILABLE": "grey",
 }
 
@@ -303,7 +305,7 @@ def kpi_strip(items: Sequence[tuple[str, object, str, str]]) -> None:
 
 
 def action_pill(action: str) -> str:
-    action = str(action or "WATCH")
+    action = str(action or "NOT HELD")
     return f'<span class="pill pill-{ACTION_CLASS.get(action, "slate")}">{_esc(action)}</span>'
 
 

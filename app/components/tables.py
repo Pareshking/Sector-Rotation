@@ -39,7 +39,7 @@ PERCENT = "percent"
 COLUMNS: dict[str, tuple[str, str, str]] = {
     # key: (label, kind, help)
     "position": ("#", "int", "Order under the selected lookback"),
-    "rank": ("Rank", "int", "Composite momentum rank across the universe"),
+    "rank": ("Rank", "int", "Strategy score rank across the universe at the latest session (provisional between rebalances)"),
     "exposure": ("Exposure", "text", ""),
     "exposure_id": ("ID", "text", "Internal identifier"),
     "category": ("Type", "text", "Sector or thematic"),
@@ -47,15 +47,17 @@ COLUMNS: dict[str, tuple[str, str, str]] = {
     "resolved_official_index_name": ("Resolved index", "text", "Index NSE actually served"),
     "data_source": ("Source", "text", "Where the history came from"),
     "value_type": ("Value", "text", "TRI = total return; CLOSE = price index; NAV = fund"),
-    "model_action": ("Action", "text", "BUY / REDUCE / WATCH"),
-    "watch_kind": ("Watch type", "text", "Rolling over, holding, or early turn"),
+    "model_action": ("Action", "text", "What the target portfolio does at the latest rebalance: BUY / HOLD / TRIM / SELL, or NOT HELD"),
+    "target_weight": ("Target weight", PERCENT, "Share of the book in the target portfolio"),
+    "decision_rank": ("Decision rank", "int", "Rank among eligible exposures at the latest month-end rebalance"),
+    "decision_status": ("Status", "text", "Why the exposure is or is not held"),
     "stage": ("Stage", "text", "Leading, Weakening, Lagging or Improving"),
     "decision_reason": ("Why", "text", ""),
     "analysis_note": ("Note", "text", ""),
     "shares_index_with": ("Shares index with", "text", "Same underlying index as this exposure"),
-    "decision_eligible": ("Decision-grade", "bool", "Has an authoritative history"),
-    "tradeable": ("Buyable", "bool", "A listed ETF that trades, or an open-ended index fund"),
-    "momentum_z": ("Momentum Z", "z", "Cross-sectional Z of relative returns · 0 = universe average"),
+    "decision_eligible": ("Decision-grade", "bool", "Has the authoritative 12-month history the score needs"),
+    "tradeable": ("Buyable", "bool", "A mapped ETF or index fund had a price on the decision date"),
+    "momentum_z": ("Score", "z", "Strategy score: weighted z-scores of the 1M, 3M-1M, 6M-3M and 12M-6M returns · 0 = universe average"),
     "rs_ratio": ("RS ratio", "ratio3", "RS line relative to its own 52-week moving average; 1.00 = at the average"),
     "rs_momentum": ("RS vel", "signed1", "13-week change in Mansfield RS"),
     "rs_trend": ("RS trend", "spark", "Mansfield relative strength, last 26 weeks"),
@@ -237,11 +239,13 @@ def action_board(columns: Sequence[tuple[str, str, pd.DataFrame, str]], limit: i
                 z = pd.to_numeric(row.get("momentum_z"), errors="coerce")
                 z_text = f"{z:+.2f}" if z == z else "—"
                 flag = "" if row.get("tradeable", True) else '<span class="pill pill-grey">no fund</span>'
+                weight = pd.to_numeric(row.get("target_weight"), errors="coerce")
+                weight_html = f'<span>Weight <b>{fmt_pct(weight, 0)}</b></span>' if weight == weight and weight > 0 else ""
                 items.append(
                     '<div class="bitem">'
                     f'<div class="bnm">{_esc(row.get("exposure"))}{flag}</div>'
                     f'<div class="bz {_sign_class(z)}">{z_text}</div>'
-                    f'<div class="bmet">{stage_cell(row.get("stage", "—"))}'
+                    f'<div class="bmet">{weight_html}{stage_cell(row.get("stage", "—"))}'
                     f'<span>RS <b>{fmt_num(row.get("rs_ratio"))}</b></span>'
                     f'<span>Vel <b>{fmt_signed(row.get("rs_momentum"), 1)}</b></span>'
                     f'<span>3M <b>{fmt_pct(row.get("return_3M"))}</b></span>'
