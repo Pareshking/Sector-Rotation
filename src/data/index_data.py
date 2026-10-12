@@ -32,11 +32,17 @@ def download_canonical_indices(
     years: int = 5,
     etf_histories: pd.DataFrame | None = None,
     canonical_etf_keys: Mapping[str, str] | None = None,
+    calendar: pd.DatetimeIndex | None = None,
 ) -> pd.DataFrame:
-    """Resolve decision-grade canonical histories with strict provenance."""
+    """Resolve decision-grade canonical histories with strict provenance.
+
+    ``calendar`` is the benchmark's session index. Every NSE series is checked
+    against it chunk by chunk before it is accepted.
+    """
     prices, sources, resolved, value_types = fetch_jugaad_canonical_indices(
-        exposure_names, years=years, workers=10
+        exposure_names, years=years, workers=10, calendar=calendar
     )
+    fetch_errors = dict(prices.attrs.get("fetch_errors", {}))
 
     missing = {
         eid: name
@@ -57,6 +63,9 @@ def download_canonical_indices(
     prices.attrs["source_by_exposure"] = sources
     prices.attrs["resolved_name_by_exposure"] = resolved
     prices.attrs["value_type_by_exposure"] = value_types
+    prices.attrs["fetch_errors"] = {
+        eid: reason for eid, reason in fetch_errors.items() if eid not in sources
+    }
     prices.attrs["unresolved_exposures"] = [
         eid
         for eid in exposure_names

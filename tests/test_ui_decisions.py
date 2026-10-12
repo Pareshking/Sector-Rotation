@@ -38,7 +38,7 @@ def _row(**overrides):
 
 
 def test_improving_exposure_is_flagged_as_an_early_turn():
-    """rs_stage puts Improving below the benchmark, so the bucket must not
+    """rs_stage puts Improving below its own 52-week RS average, so the bucket must not
     require rs_ratio > 1 — that combination can never occur."""
     frame = pd.DataFrame([_row(exposure="Early", stage="Improving", rs_ratio=0.98, rs_momentum=8.9)])
     out = decision_frame(frame)
@@ -90,3 +90,39 @@ def test_relative_ranking_reorders_versus_absolute():
     by_rel = frame.sort_values(_column_for("3M", BASIS_RELATIVE), ascending=False)
     assert by_abs.exposure.iat[0] == "Beta chaser"
     assert by_rel.exposure.iat[0] == "True leader"
+
+
+def test_rs_ratio_notes_describe_the_52_week_average_not_the_benchmark():
+    """rs_ratio is the RS line over its own 52-week mean; it says nothing about beating Nifty."""
+    frame = pd.DataFrame([
+        _row(exposure="Fading", stage="Weakening", rs_ratio=1.10, rs_momentum=-3.0),
+        _row(exposure="Early", stage="Improving", rs_ratio=0.95, rs_momentum=4.0),
+    ])
+    for note in decision_frame(frame)["analysis_note"]:
+        assert "52-week moving average" in note
+        assert "the benchmark" not in note
+
+
+def test_the_rs_ratio_column_help_does_not_claim_a_benchmark_comparison():
+    from app.components.tables import COLUMNS
+
+    _, _, help_text = COLUMNS["rs_ratio"]
+    assert "52-week moving average" in help_text
+    assert "Nifty" not in help_text
+
+
+def test_navigation_links_to_the_default_page_at_the_root():
+    """'/Overview' answers 'Page not found': the default page is served at '/'."""
+    from app.components.theme import NAV_ITEMS, nav_href
+
+    assert nav_href("Overview") == "/"
+    assert nav_href("Backtest") == "/Backtest"
+    assert all(nav_href(path) != "/Overview" for _, path, _ in NAV_ITEMS)
+
+
+def test_the_logo_links_to_the_site_root():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py").read_text(encoding="utf-8")
+    assert 'link="https://dualmomentum.streamlit.app/"' in source
+    assert "streamlit.app/Overview" not in source

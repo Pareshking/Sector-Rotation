@@ -409,6 +409,15 @@ NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# The default page is served at the root. Streamlit does not route its
+# url_path, so "/Overview" answers "Page not found".
+HOME_PATH = "Overview"
+
+
+def nav_href(path: str) -> str:
+    return "/" if path == HOME_PATH else f"/{path}"
+
+
 def mobile_nav(active: str = "") -> None:
     """Horizontal, scrollable page bar for narrow screens.
 
@@ -416,7 +425,7 @@ def mobile_nav(active: str = "") -> None:
     page sits two taps deep behind a chevron on a phone.
     """
     links = "".join(
-        f'<a class="{"on" if path == active else ""}" href="/{path}" target="_self">'
+        f'<a class="{"on" if path == active else ""}" href="{nav_href(path)}" target="_self">'
         f'{icon} {_esc(label)}</a>'
         for label, path, icon in NAV_ITEMS
     )

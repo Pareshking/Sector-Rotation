@@ -1,7 +1,8 @@
 """Data-quality checks run against a freshly built dataset.
 
-The pipeline already fails closed on canonical coverage. These checks catch the
-quieter failures: a number that used to be right and silently got worse. ETF
+The pipeline tolerates incomplete canonical coverage (short or missing histories
+are listed as skipped, never proxied). These checks catch the quieter failures:
+a number that used to be right and silently got worse. ETF
 coverage moved 31 -> 29 between two production runs and nothing anywhere said
 so, because every individual run looked internally consistent.
 
@@ -29,6 +30,15 @@ STALE_DAYS = 5
 MAX_DATA_AGE_HOURS = 36
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
+
+# How much of the return a value type carries. A total-return index includes
+# reinvested dividends; an ETF NAV includes them net of fees; a price index has
+# none. Anything unrecognised ranks below all three.
+VALUE_TYPE_RANK = {"TRI": 3, "NAV": 2, "CLOSE": 1}
+
+
+def _value_type_rank(value: object) -> int:
+    return VALUE_TYPE_RANK.get(str(value or "").upper(), 0)
 
 
 @dataclass
@@ -132,6 +142,80 @@ def _observation_drop(report: QualityReport, new: dict, previous: dict) -> None:
         )
 
 
+def _benchmark_value_type(report: QualityReport, new: dict, previous: dict) -> None:
+    """The benchmark's dividend treatment sits on one side of every relative number.
+
+    A silent TRI -> CLOSE fallback on Nifty 50 alone overstates all 47 relative
+    returns by roughly the index's dividend yield, so it is an error whether or
+    not the previous run recorded a type.
+    """
+    if "benchmark_value_type" not in new:
+        return
+    current = str(new.get("benchmark_value_type") or "UNKNOWN").upper()
+    if _value_type_rank(current) == 0:
+        report.add(
+            "error",
+            "benchmark_value_type_unknown",
+            f"Benchmark value type is {current!r}; no relative return can be trusted without it.",
+        )
+        return
+    before = previous.get("benchmark_value_type")
+    if before:
+        before = str(before).upper()
+        if _value_type_rank(current) < _value_type_rank(before):
+            report.add(
+                "error",
+                "benchmark_value_type_regression",
+                f"Benchmark value type fell from {before} to {current} since the previous run. "
+                "Every relative return now compares against a series with less of its return in it.",
+            )
+        elif current != before:
+            report.add(
+                "warning",
+                "benchmark_value_type_changed",
+                f"Benchmark value type changed from {before} to {current}.",
+            )
+    exposures = new.get("value_type_by_canonical_exposure") or {}
+    richer = sorted(eid for eid, kind in exposures.items() if _value_type_rank(kind) > _value_type_rank(current))
+    if richer:
+        report.add(
+            "error",
+            "value_type_mismatch",
+            f"Benchmark is {current} but {len(richer)} exposure(s) carry more of their return "
+            f"({', '.join(richer[:8])}{' …' if len(richer) > 8 else ''}); their relative returns are "
+            "overstated by roughly the benchmark's dividend yield.",
+        )
+
+
+def _exposure_value_type_regression(report: QualityReport, new: dict, previous: dict) -> None:
+    before = previous.get("value_type_by_canonical_exposure") or {}
+    after = new.get("value_type_by_canonical_exposure") or {}
+    worse = [
+        f"{eid} {before[eid]}→{after[eid]}"
+        for eid in sorted(set(before) & set(after))
+        if _value_type_rank(after[eid]) < _value_type_rank(before[eid])
+    ]
+    if worse:
+        report.add(
+            "error",
+            "value_type_regression",
+            f"{len(worse)} canonical series lost return content since the previous run: "
+            + ", ".join(worse[:8])
+            + (" …" if len(worse) > 8 else ""),
+        )
+    better = [
+        eid
+        for eid in sorted(set(before) & set(after))
+        if _value_type_rank(after[eid]) > _value_type_rank(before[eid])
+    ]
+    if better:
+        report.add(
+            "info",
+            "value_type_upgraded",
+            f"{len(better)} canonical series now carry more of their return: {', '.join(better[:8])}",
+        )
+
+
 def _publication_age(report: QualityReport, new: dict) -> None:
     """Catch a silent publishing failure by its symptom, not its cause."""
     stamp = new.get("last_updated_utc")
@@ -167,9 +251,11 @@ def check_dataset(
         _coverage_regression(report, new_metadata, previous)
         _dropped_series(report, new_metadata, previous)
         _observation_drop(report, new_metadata, previous)
+        _exposure_value_type_regression(report, new_metadata, previous)
     else:
         report.add("info", "baseline", "No previous metadata found; skipped regression checks.")
 
+    _benchmark_value_type(report, new_metadata, previous)
     _publication_age(report, new_metadata)
     _staleness(report, index_prices)
     _flatlines(report, index_prices, "canonical index histories", "error")

@@ -111,9 +111,9 @@ action_board(
 if not rolling_over.empty:
     names = ", ".join(rolling_over.head(6).exposure.tolist())
     note(
-        f"<b>{len(rolling_over)} leaders are rolling over.</b> Still above the benchmark on RS "
-        f"ratio, but RS velocity has turned negative — leadership is fading before the exit rule "
-        f"triggers: {names}.",
+        f"<b>{len(rolling_over)} leaders are rolling over.</b> Their RS line is still above its "
+        f"own 52-week moving average, but RS velocity has turned negative — leadership is fading "
+        f"before the exit rule triggers: {names}.",
         tone="amber",
     )
 
@@ -151,8 +151,10 @@ section("How a decision is reached")
 note(
     "<b>BUY</b> = Leading stage + RS ratio &gt; 1 + positive RS velocity + positive momentum Z.<br>"
     "<b>REDUCE / EXIT</b> = Weakening or Lagging + RS ratio &lt; 1 + negative RS velocity.<br>"
-    "<b>Early turn</b> = Improving stage with RS velocity newly positive — below the benchmark, "
-    "but no longer falling behind.<br>"
+    "<b>Early turn</b> = Improving stage with RS velocity positive — the RS line is still "
+    "below its own 52-week moving average, but no longer falling further below it.<br>"
+    "<b>RS ratio</b> is the RS line relative to its own 52-week moving average, not a "
+    "comparison with Nifty 50 over a fixed window.<br>"
     "Rank orders strength; it is never a BUY or SELL gate."
 )
 

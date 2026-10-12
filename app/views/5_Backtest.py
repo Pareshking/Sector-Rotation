@@ -10,9 +10,23 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import CHART_CONFIG, equity_curve, monthly_excess, rolling_excess
-from app.components.theme import mobile_nav, fmt_pct, inject_theme, kpi_strip, note, page_header, section
+from app.components.charts import (
+    CHART_CONFIG,
+    equity_curve,
+    monthly_excess,
+    rolling_excess,
+)
+from app.components.theme import (
+    fmt_pct,
+    inject_theme,
+    kpi_strip,
+    mobile_nav,
+    note,
+    page_header,
+    section,
+)
 from app.data import load_backtest, load_decisions, load_index_panel, load_sensitivity
+from src.quantitative.analytics import RISK_FREE_ANNUAL
 
 inject_theme()
 mobile_nav("Backtest")
@@ -56,7 +70,8 @@ note(
     "<b>Buyable only</b> — same ranking, but a pick must have had a real ETF or index fund "
     "trading on that date. It measures <i>the portfolio</i>: could you have owned it?<br>"
     "<b>Buyable + entry rule</b> — and the exposure must also satisfy the live BUY rule "
-    "(Leading, RS ratio above 1, positive RS velocity). It measures <i>what this app would "
+    "(Leading, RS ratio above 1, positive RS velocity, positive momentum Z). It measures "
+    "<i>what this app would "
     "actually have told you to do</i>.<br>"
     "Each step is stricter than the last, so the return falls at each one. The gap between the "
     "first and the last is the part of the headline result you could never have captured."
@@ -94,7 +109,7 @@ max_rank_depth = extra[1].segmented_control(
 absolute_filter = extra[2].toggle(
     "Absolute momentum filter (dual momentum)", value=True, key="bt_abs",
     help="Only hold an exposure whose own 12-month return is positive; otherwise that slot "
-         "sits in cash at 0%.",
+         f"sits in cash, earning the {RISK_FREE_ANNUAL:.1%} risk-free rate.",
 )
 
 result = load_backtest(
@@ -395,7 +410,9 @@ note(
     f"{int(hold_months or 1)}-month period the universe is ranked by composite momentum "
     "Z-score using only prices up to that day. The top "
     f"{top_n or 2} qualifying exposures are held, equally weighted, until the next rebalance. "
-    "The return of a decision is measured entirely after the decision was made."
+    "The return of a decision is measured entirely after the decision was made. Any slot "
+    f"left in cash earns the {RISK_FREE_ANNUAL:.1%} risk-free rate, and only completed months "
+    "are counted: the current month joins the record once it closes."
     + (
         " A pick must have had a buyable vehicle on that date, judged from the vehicle's own "
         f"price history. When the top name fails, the next is taken, down to rank "
@@ -404,10 +421,10 @@ note(
         else ""
     )
     + (" A pick must also satisfy the live BUY rule: Leading stage, RS ratio above 1, positive "
-       "RS velocity." if require_buy else "")
+       "RS velocity and positive momentum Z." if require_buy else "")
     + (
         " With the absolute-momentum filter on, an exposure whose own trailing 12-month return "
-        "is negative is skipped and that slot earns 0% in cash."
+        "is negative is skipped and that slot goes to cash."
         if absolute_filter
         else " The absolute-momentum filter is off."
     )

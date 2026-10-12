@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from src.data.cache import write_parquet
+
 # Importing etf_data/index_data pulls in src.data._jugaad_patches, which
 # installs a socket timeout and widens jugaad-data's date-chunking before any
 # NSE fetch runs. See that module for why both are necessary.
@@ -23,6 +25,7 @@ from src.quantitative.relative_strength import (
     rs_ratio,
     rs_stage,
 )
+from src.quantitative.validation import validate_price_matrix, validate_returns
 from src.universe.registry import UniverseRegistry
 from src.universe.validation import validate_universe
 
@@ -126,6 +129,9 @@ def build_fixture(registry, days=1300):
         "source_counts": {"niftyindices_jugaad": total, "mfapi": int(etf_prices.shape[1])},
         "source_by_canonical_exposure": {e.id: "niftyindices_jugaad" for e in registry.all()},
         "value_type_by_canonical_exposure": {e.id: "TRI" for e in registry.all()},
+        "benchmark_source": "niftyindices_jugaad",
+        "benchmark_value_type": "TRI",
+        "canonical_fetch_errors": {},
         "etf_total": int(etf_prices.shape[1]),
         "etf_valid_series": int(etf_prices.shape[1]),
         "etf_coverage_ratio": 1.0,
@@ -171,16 +177,29 @@ def build_live(registry, skip_etf: bool = False):
         etf_history, etf_sources, resolved_codes = _load_existing_etf_artifacts()
     else:
         etf_history, etf_sources, resolved_codes = fetch_etf_histories(etf_objects, years=5)
-    _stage("Fetching canonical index histories + benchmark...")
+    # The benchmark comes first: its sessions are the calendar every exposure
+    # is checked against for missing or truncated request chunks.
+    _stage("Fetching benchmark...")
+    benchmark = download_benchmark(registry.benchmark_name.upper(), years=5)
+    if benchmark.dropna().empty:
+        reasons = "; ".join(benchmark.attrs.get("errors", [])) or "no usable history"
+        raise RuntimeError(f"Unable to download Nifty 50 benchmark history: {reasons}")
+    # Read before any alignment: pandas operations do not reliably carry attrs.
+    benchmark_value_type = str(benchmark.attrs.get("value_type", "UNKNOWN"))
+    benchmark_source = str(benchmark.attrs.get("source", "unknown"))
+
+    _stage("Fetching canonical index histories...")
     prices = download_canonical_indices(
         exposure_names,
         years=5,
         etf_histories=etf_history,
         canonical_etf_keys=PRIMARY_CANONICAL_ETF_BY_EXPOSURE,
+        calendar=benchmark.dropna().index,
     )
     source_by_exposure = dict(prices.attrs.get("source_by_exposure", {}))
     resolved_names = dict(prices.attrs.get("resolved_name_by_exposure", {}))
     value_types = dict(prices.attrs.get("value_type_by_exposure", {}))
+    fetch_errors = dict(prices.attrs.get("fetch_errors", {}))
 
     non_authoritative = [
         eid
@@ -189,10 +208,6 @@ def build_live(registry, skip_etf: bool = False):
     ]
     if non_authoritative:
         prices = prices.drop(columns=non_authoritative, errors="ignore")
-
-    benchmark = download_benchmark(registry.benchmark_name.upper(), years=5)
-    if benchmark.dropna().empty:
-        raise RuntimeError("Unable to download Nifty 50 benchmark history")
 
     valid = [
         e.id
@@ -228,6 +243,9 @@ def build_live(registry, skip_etf: bool = False):
         "source_counts": source_counts,
         "source_by_canonical_exposure": source_by_exposure,
         "value_type_by_canonical_exposure": value_types,
+        "benchmark_source": benchmark_source,
+        "benchmark_value_type": benchmark_value_type,
+        "canonical_fetch_errors": fetch_errors,
         "resolved_official_index_names": resolved_names,
         "etf_total": len(etf_objects),
         "etf_valid_series": etf_valid,
@@ -271,6 +289,25 @@ def _analytics_columns(asset, benchmark) -> dict[str, float]:
     }
 
 
+def price_input_problems(prices: pd.DataFrame, benchmark: pd.Series) -> list[str]:
+    """Everything wrong with the ranking inputs; empty when they are usable.
+
+    Ranking, relative strength and the backtest all assume positive, unique,
+    dated prices. A zero or negative level, a duplicated date or an infinite
+    return would flow straight into every Z-score, so the run stops instead.
+    """
+    problems: list[str] = []
+    for label, frame in (
+        ("canonical index panel", prices),
+        ("benchmark", benchmark.to_frame("benchmark")),
+    ):
+        problems += [f"{label}: {m}" for m in validate_price_matrix(frame)]
+        problems += [
+            f"{label}: {m}" for m in validate_returns(frame.pct_change(fill_method=None))
+        ]
+    return problems
+
+
 def run(mode, skip_etf: bool = False, strict: bool = False):
     registry = UniverseRegistry.from_json(UNIVERSE_PATH)
     report = validate_universe(registry.all())
@@ -289,6 +326,14 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
     benchmark = benchmark.loc[common].sort_index()
     if prices.empty:
         raise RuntimeError("No overlapping authoritative benchmark/exposure history was downloaded")
+    problems = price_input_problems(prices, benchmark)
+    if problems:
+        raise ValueError("Price validation failed before ranking: " + "; ".join(problems))
+    etf_problems = (
+        [f"ETF price history: {m}" for m in validate_price_matrix(etf_history)]
+        if not etf_history.empty
+        else []
+    )
 
     _stage("Ranking and computing durability analytics...")
     rankings = rank_exposures(prices, benchmark, weights=registry.momentum_weights)
@@ -360,7 +405,6 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
         "etf_ingestion": "reused" if (mode == "live" and skip_etf) else "refreshed",
         "benchmark": registry.benchmark_name,
         "momentum_weights": normalise_weights(registry.momentum_weights),
-        "benchmark_source": "niftyindices_jugaad",
         "last_updated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "observations": int(len(prices)),
         "valid_series": int(prices.shape[1]),
@@ -368,7 +412,7 @@ def run(mode, skip_etf: bool = False, strict: bool = False):
         "coverage_ratio": float(prices.shape[1] / max(len(registry.all()), 1)),
         "index_panel_start": str(index_panel.index.min().date()),
         "index_panel_end": str(index_panel.index.max().date()),
-        "validation_warnings": list(report.warnings),
+        "validation_warnings": list(report.warnings) + etf_problems,
         **health,
     }
     # Compare against the last published run before overwriting it. A run that
@@ -407,4 +451,5 @@ if __name__ == "__main__":
         help="Exit non-zero when a data-quality check reports an error.",
     )
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
     run(args.mode, skip_etf=args.skip_etf, strict=args.strict)
