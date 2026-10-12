@@ -19,19 +19,22 @@ class PageSpec:
     file: str
     title: str
     url_path: str
-    icon: str
+    icon: str | None
     default: bool = False
 
 
-# Material icons render as glyphs in the top nav in both themes.
+# The Screener is the home page, as it is in the Paresh app (owner, 12 Oct 2026).
 PAGES: tuple[PageSpec, ...] = (
-    PageSpec("1_Portfolio.py", "Portfolio", "Portfolio", ":material/account_balance_wallet:", default=True),
-    PageSpec("2_Rankings.py", "Rankings", "Rankings", ":material/leaderboard:"),
-    PageSpec("3_Evidence.py", "Evidence", "Evidence", ":material/query_stats:"),
-    PageSpec("4_Exposure.py", "Exposure", "Exposure", ":material/target:"),
-    PageSpec("5_Data_Health.py", "Data Health", "Data_Health", ":material/health_and_safety:"),
-    PageSpec("6_Method.py", "Method", "Method", ":material/menu_book:"),
+    PageSpec("2_Rankings.py", "Screener", "Screener", None, default=True),
+    PageSpec("1_Portfolio.py", "Portfolio", "Portfolio", None),
+    PageSpec("4_Exposure.py", "Exposure", "Exposure", None),
+    PageSpec("3_Evidence.py", "Evidence", "Evidence", None),
+    PageSpec("5_Data_Health.py", "Data Health", "Data_Health", None),
+    PageSpec("6_Method.py", "Method", "Method", None),
 )
+
+# The ☰ menu's sections on a phone, by index into PAGES.
+GROUPS = {"Research": [0, 1, 2], "Monitoring": [3, 4], "System": [5]}
 
 # The default page is served at the root. Streamlit does not route a default
 # page's url_path, so linking to "/Portfolio" would answer "Page not found".
