@@ -1,7 +1,7 @@
 """The app's six pages: one definition for the page list, the routes and the phone nav.
 
-``app/streamlit_app.py`` builds ``st.navigation`` from ``PAGES`` and
-``mobile_nav`` renders the same list, so the two can never disagree about what
+``app/streamlit_app.py`` builds ``st.navigation`` from ``PAGES`` and renders
+``mobile_nav`` from the same list, so the two can never disagree about what
 exists or where it lives.
 """
 
@@ -23,13 +23,14 @@ class PageSpec:
     default: bool = False
 
 
+# Material icons render as glyphs in the top nav in both themes.
 PAGES: tuple[PageSpec, ...] = (
-    PageSpec("1_Portfolio.py", "Portfolio", "Portfolio", "💼", default=True),
-    PageSpec("2_Rankings.py", "Rankings", "Rankings", "📊"),
-    PageSpec("3_Evidence.py", "Evidence", "Evidence", "📈"),
-    PageSpec("4_Exposure.py", "Exposure", "Exposure", "💹"),
-    PageSpec("5_Data_Health.py", "Data Health", "Data_Health", "🛡️"),
-    PageSpec("6_Method.py", "Method", "Method", "📘"),
+    PageSpec("1_Portfolio.py", "Portfolio", "Portfolio", ":material/account_balance_wallet:", default=True),
+    PageSpec("2_Rankings.py", "Rankings", "Rankings", ":material/leaderboard:"),
+    PageSpec("3_Evidence.py", "Evidence", "Evidence", ":material/query_stats:"),
+    PageSpec("4_Exposure.py", "Exposure", "Exposure", ":material/target:"),
+    PageSpec("5_Data_Health.py", "Data Health", "Data_Health", ":material/health_and_safety:"),
+    PageSpec("6_Method.py", "Method", "Method", ":material/menu_book:"),
 )
 
 # The default page is served at the root. Streamlit does not route a default
@@ -49,7 +50,7 @@ def mobile_nav(active: str = "") -> None:
     """
     links = "".join(
         f'<a class="{"on" if page.url_path == active else ""}" href="{nav_href(page.url_path)}" '
-        f'target="_self">{page.icon} {_esc(page.title)}</a>'
+        f'target="_self">{_esc(page.title)}</a>'
         for page in PAGES
     )
-    st.markdown(f'<nav class="mnav">{links}</nav>', unsafe_allow_html=True)
+    st.markdown(f'<nav class="ds-mnav">{links}</nav>', unsafe_allow_html=True)

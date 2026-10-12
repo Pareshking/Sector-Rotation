@@ -8,7 +8,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from app.components.theme import _esc
 from src.formatting import format_updated
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,34 +90,6 @@ def health_summary(metadata: dict[str, object] | None = None) -> dict[str, objec
             metadata.get("canonical_coverage_ratio", 0.0) >= 1.0 and not skipped and proxy == 0
         ),
     }
-
-
-def data_health_banner(metadata: dict[str, object] | None = None) -> None:
-    """One compact line of provenance, above the fold on every page."""
-    health = health_summary(metadata)
-    if not health:
-        st.markdown(
-            '<div class="hs hs-warn">Data health · prepared metadata is unavailable</div>',
-            unsafe_allow_html=True,
-        )
-        return
-    tone = "" if health["healthy"] else " hs-warn"
-    etf_note = f'{health["etf_valid"]}/{health["etf_total"]} ETF price histories'
-    proxy_note = (
-        f'<span class="hs-sep">|</span><span><b>{health["proxy"]}</b> proxy excluded</span>'
-        if health["proxy"]
-        else ""
-    )
-    age = f' · {_esc(health["age"])}' if health["age"] else ""
-    st.markdown(
-        f'<div class="hs{tone}">'
-        f'<span><b>{health["decision_grade"]}/{health["total"]}</b> decision-grade histories</span>'
-        f"{proxy_note}"
-        f'<span class="hs-sep">|</span><span>{_esc(etf_note)}</span>'
-        f'<span class="hs-time">Updated {_esc(health["updated"])}{age}</span>'
-        "</div>",
-        unsafe_allow_html=True,
-    )
 
 
 def lineage_frame(metadata: dict[str, object] | None = None) -> pd.DataFrame:
@@ -235,34 +206,3 @@ def decision_frame(summary: pd.DataFrame, portfolio=None) -> pd.DataFrame:
     frame["analysis_note"] = [f"Decision at the {as_of} close. {r}" for r in reasons]
     frame["shares_index_with"] = _shared_index_map(frame)
     return frame
-
-
-def market_state(panel: pd.DataFrame, benchmark: pd.Series, decisions: pd.DataFrame) -> dict[str, object]:
-    """Headline market context: regime, benchmark level, and breadth.
-
-    Regime is the benchmark against its own 200-day average — the crudest
-    honest read of whether the tide is going in or out. Breadth is how much of
-    the universe is actually leading, which is what decides whether a rotation
-    model has anything to rotate into.
-    """
-    state: dict[str, object] = {}
-    series = pd.to_numeric(benchmark, errors="coerce").dropna() if benchmark is not None else pd.Series(dtype=float)
-    if not series.empty:
-        last = float(series.iloc[-1])
-        state["level"] = last
-        state["as_of"] = series.index[-1]
-        if len(series) >= 200:
-            average = float(series.tail(200).mean())
-            if average > 0:
-                gap = last / average - 1.0
-                state["vs_200d"] = gap
-                state["regime"] = "BULLISH" if gap >= 0 else "BEARISH"
-    if decisions is not None and not decisions.empty and "stage" in decisions.columns:
-        eligible = decisions[decisions.get("decision_eligible", True)]
-        leading = int((eligible["stage"] == "Leading").sum())
-        state["leading"] = leading
-        state["universe"] = int(len(eligible))
-        if len(eligible):
-            state["breadth"] = leading / len(eligible)
-    del panel
-    return state

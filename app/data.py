@@ -368,6 +368,14 @@ def _vehicle_frame(modified_ns: int = 0) -> pd.DataFrame:
     return frame
 
 
+def vehicle_frame(exposure_id: str | None = None) -> pd.DataFrame:
+    """Every mapped vehicle (or one exposure's), with inception date and NSE snapshot."""
+    frame = _vehicle_frame(_stamp("etf_universe.parquet"))
+    if exposure_id is None or frame.empty:
+        return frame
+    return frame[frame["exposure_id"].astype(str) == str(exposure_id)].reset_index(drop=True)
+
+
 def best_vehicle(exposure_id: str, as_of):
     """The fund to buy ``exposure_id`` through on ``as_of`` (src/portfolio/vehicles.py)."""
     from src.portfolio.vehicles import choose_vehicle
