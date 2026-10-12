@@ -66,6 +66,15 @@ live = load_portfolio()
 ordered = pd.concat([decisions[decisions["model_action"].isin(HELD_ACTIONS)],
                      decisions[~decisions["model_action"].isin(HELD_ACTIONS)]])
 options = ordered["exposure"].tolist()
+# ?exposure=<id> is how a Screener row opens this page (its table cannot call
+# back into Python). Applied once per id, so picking another exposure here is
+# not undone by the next rerun.
+wanted = str(st.query_params.get("exposure") or "")
+if wanted and st.session_state.get("_exposure_from_url") != wanted:
+    st.session_state["_exposure_from_url"] = wanted
+    match = decisions.loc[decisions["exposure_id"].astype(str) == wanted, "exposure"]
+    if not match.empty:
+        st.session_state["detail_exposure"] = match.iloc[0]
 exposure = st.selectbox(
     "Exposure", options, key="detail_exposure",
     help="Type to search. Held exposures are listed first, then every other one in rank order.",
