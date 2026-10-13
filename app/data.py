@@ -8,6 +8,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "processed"
 UNIVERSE_PATH = ROOT / "data" / "universe" / "universe.json"
+BOOK_RECORD = DATA_DIR / "model_book_record.csv"  # forward record, appended nightly (tools/record_book.py)
 
 
 def _mtime(name: str) -> int:
@@ -452,9 +453,25 @@ def _model_book(modified_ns: int = 0):
     )
 
 
-def load_model_book():
+def load_replayed_book():
+    """The book as a fresh replay of the whole history, every month backfilled."""
     return _model_book(_stamp("index_prices.parquet", "etf_prices.parquet", "etf_universe.parquet",
                               "cash_nav.parquet", "summary_rankings.parquet"))
+
+
+@st.cache_data(show_spinner=False)
+def _book_record(modified_ns: int = 0) -> pd.DataFrame:
+    del modified_ns
+    from src.portfolio.record import read_record
+
+    return read_record(BOOK_RECORD)
+
+
+def load_model_book():
+    """The replayed book with every recorded month frozen (src/portfolio/record.py)."""
+    from src.portfolio.record import apply_record
+
+    return apply_record(load_replayed_book(), _book_record(_mtime(BOOK_RECORD.name)))
 
 
 def market_state():

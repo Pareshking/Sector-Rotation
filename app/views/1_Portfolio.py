@@ -164,7 +164,12 @@ with kit.card("Calendar returns", "portfolio_monthly", f"Strategy, {BENCH} and A
     grid = build_grid(monthly.assign(Alpha=monthly["Strategy"] - monthly["Benchmark"]),
                       {"Strategy": "Strategy", "Benchmark": BENCH, "Alpha": "Alpha"})
     render_calendar_returns(grid)
-    if latest is not None and latest["Origin"] == "MTD":
+    recorded = monthly[monthly["Origin"] == "Recorded"]
+    if not recorded.empty:
+        first = pd.Period(recorded["Period"].iloc[0], freq="M").strftime("%b %Y")
+        lead = f"{month} is month to date. " if latest is not None and latest["Origin"] == "MTD" else ""
+        st.caption(f"{lead}From {first} each month is recorded as it closed; earlier months are a backfilled replay.")
+    elif latest is not None and latest["Origin"] == "MTD":
         st.caption(f"{month} is month to date. Every earlier month is a backfilled replay of the live rules.")
 
 # Activity.
