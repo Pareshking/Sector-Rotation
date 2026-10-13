@@ -222,6 +222,14 @@ def test_the_rankings_filter_counts_come_from_the_data():
         ["Sector", "Theme"], ["Rank", "Rank Δ", "1M", "3M", "6M", "12M", "Max DD"], ["Absolute", "vs Nifty 50"]]
     assert at.selectbox[0].placeholder == "Search exposure or index"
     assert [e.label for e in at.expander] == ["RRG view"]
+    from app.components.screener import PRESETS
+
+    for preset in PRESETS[1:]:
+        at.button_group(key="rank_quick_pills").set_value(preset).run()
+        assert not at.exception, preset
+    at.button_group(key="rank_basis").set_value("vs Nifty 50").run()
+    at.button_group(key="rank_sort_by").set_value("Max DD").run()
+    assert not at.exception
 
 
 @needs_data

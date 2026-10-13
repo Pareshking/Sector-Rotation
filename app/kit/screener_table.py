@@ -157,7 +157,7 @@ def _row_html(row: dict, cols: list, paths: dict) -> str:
     cells["hurdle"] = _pct_cell(_num(row.get("12M vs cash")))
     sc = _num(row.get("Score"))
     cells["score"] = (f'<td class="n{"" if sc is None else " pos" if sc > 0 else " neg"}" '
-                      f'data-v="{"" if sc is None else sc}">{"—" if sc is None else f"{sc:+.2f}"}</td>')
+                      f'data-v="{"" if sc is None else sc}">{"—" if sc is None else f"{sc:+.2f}".replace("-", "−")}</td>')
     status = _text(row.get("Portfolio"))
     tone = _STATUS_TONE.get(status.upper())
     status_html = (f'<span class="badge {tone}">{_esc(status.title())}</span>' if tone
@@ -231,7 +231,7 @@ td.c-path{padding-left:14px}
   td.c-stock .sym{font-size:14px;overflow:hidden;text-overflow:ellipsis;max-width:140px}
   td.c-stock .sub{display:block;font-size:12px;max-width:130px}
   .wrap tr.grp-row{display:none}
-  .wrap thead tr.hdr th{top:0}
+  thead tr.grp-row + tr.hdr th,thead tr.hdr th{top:0}
   td.c-path{padding-left:0}
   td.c-path svg{width:54px}
   th .lbl-d{display:none}
