@@ -1,5 +1,15 @@
+"""Screener: the Paresh app's Screener (src/ui/views/ranking_view.py), on sector and theme indices.
+
+The layout, the toolbar, the table and the movement cards are Paresh's own
+(``app/kit``). What differs is only the data: one row per exposure from
+``load_decisions()`` instead of one per stock, and a row opens the Exposure
+page instead of a stock page. The figures are decided in
+``app/components/screener.py``.
+"""
+
 from __future__ import annotations
 
+import html
 import sys
 from pathlib import Path
 
@@ -10,127 +20,226 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import CHART_CONFIG, rrg_scatter  # noqa: E402
-from app.components.metrics import HELD_ACTIONS  # noqa: E402
-from app.components.tables import audit_frame, show_table, tinted  # noqa: E402
-from app.components.theme import (  # noqa: E402
-    STAGE_TONE,
-    chip,
-    html_block,
-    note,
-    page_header,
-    section,
-    stage_legend,
+from app.components import screener as scr  # noqa: E402
+from app.data import (  # noqa: E402
+    current_regime,
+    load_decisions,
+    load_index_panel,
+    load_portfolio,
+    strategy_config,
+    vehicle_frame,
 )
-from app.data import load_decisions  # noqa: E402
+from app.kit.screener_table import exposure_href, render_screener_table, signed_pct  # noqa: E402
 
-page_header(
-    "The whole universe",
-    "Rankings",
-    "Every sector and theme on the strategy's own score at the latest session. The portfolio acts on these "
-    "ranks only at month end.",
-)
+BASES = ("Absolute", "vs Nifty 50")
+_SORT_MIRROR = "_rank_sort_by_idx"
+_BASIS_MIRROR = "_rank_basis_idx"
+
+
+def _head():
+    """One row: the title and Export CSV, as Paresh draws it (no subtitle)."""
+    head = st.container(key="scr_head", horizontal=True, vertical_alignment="center", gap="medium", wrap=True)
+    head.html('<div class="scr-head"><h1>Screener</h1></div>', width="content")
+    head.html("<span></span>", width="stretch")
+    return head.container(width="content")
+
 
 decisions = load_decisions()
 if decisions.empty:
-    note("No prepared ranking dataset is available.", tone="warn")
+    _head()
+    st.info("No prepared ranking dataset is available.")
     st.stop()
 
-counts = decisions["category"].value_counts()
-universes = {
-    f"All ({len(decisions)})": None,
-    f"Sectors ({int(counts.get('sector', 0))})": "sector",
-    f"Themes ({int(counts.get('thematic', 0))})": "thematic",
-}
-with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
-    picked = st.segmented_control("Universe", list(universes), default=list(universes)[0], key="rank_universe")
-    basis = st.segmented_control(
-        "Returns", ["Absolute", "vs Nifty 50"], default="Absolute", key="rank_basis",
-        help="Absolute is what a holder earned; vs Nifty 50 subtracts the benchmark over the same window.",
+panel, _ = load_index_panel()
+regime = current_regime()
+hurdle = regime.cash_12m if regime is not None else None
+buffer = int(strategy_config().retention_buffer_m)
+live = load_portfolio()
+rebalance = pd.Timestamp(live.target.as_of) if live is not None else None
+as_of = panel.index.max() if not panel.empty else pd.Timestamp.today().normalize()
+levels = panel.ffill().iloc[-1] if not panel.empty else pd.Series(dtype=float)
+funds = scr.fund_counts(vehicle_frame(), as_of)
+search_opts, by_name, by_index = scr.search_options(decisions)
+
+c_export = _head()
+
+# ── Search, presets, sort ───────────────────────────────────────────────────
+masks = scr.preset_masks(decisions, hurdle, buffer)
+counts = {p: int(m.sum()) for p, m in masks.items()}
+
+
+def _open_searched_exposure() -> None:
+    # Choosing an exposure opens its page, like every other exposure link, so
+    # the search box is how you get to any exposure by name. An index filters.
+    val = st.session_state.get("rank_search_predictive")
+    if val in by_name:
+        st.session_state["detail_exposure"] = val
+        st.session_state["_scr_open_exposure"] = True
+        st.session_state["rank_search_predictive"] = None
+
+
+def _reset_screener_filters() -> None:
+    # Popped, not assigned: each widget passes its own default, and a
+    # session-state value on top of a default makes Streamlit warn on the page.
+    for key in ("rank_category_filter", "rank_sort_by", "rank_basis", "rank_quick_pills"):
+        st.session_state.pop(key, None)
+    st.session_state[_SORT_MIRROR] = 0
+    st.session_state[_BASIS_MIRROR] = 0
+
+
+def _mirror(key: str, size: int) -> int:
+    value = st.session_state.get(key, 0)
+    return value if isinstance(value, int) and 0 <= value < size else 0
+
+
+with st.container(key="scr_toolbar", horizontal=True, vertical_alignment="center", gap="small"):
+    selected_search = st.selectbox(
+        "Search exposure or index",
+        options=search_opts,
+        index=None,
+        placeholder="Search exposure or index",
+        key="rank_search_predictive",
+        label_visibility="collapsed",
+        on_change=_open_searched_exposure,
+        width=260,
     )
-    only_buyable = st.toggle(
-        "Buyable only", value=False, key="rank_buyable",
-        help="Only exposures with a mapped ETF or index fund that had incepted by the latest decision date.",
-    )
-search = st.text_input("Search exposures", placeholder="Search: pharma, defence, bank…", label_visibility="collapsed")
+    preset = st.pills(
+        "Presets",
+        list(scr.PRESETS),
+        default=scr.DEFAULT_PRESET,
+        required=True,
+        format_func=lambda o: scr.preset_label(o, counts[o], buffer),
+        key="rank_quick_pills",
+        label_visibility="collapsed",
+        width="content",
+    ) or scr.DEFAULT_PRESET
+    with st.popover("Filters & sort", icon=":material/tune:", width="content"), \
+            st.container(key="scr_filters"):
+        # On a phone theme.py pins this panel to the bottom of the screen as a
+        # sheet; on a desktop it is an ordinary dropdown.
+        categories = st.pills(
+            "Category", ["sector", "thematic"], selection_mode="multi",
+            format_func=lambda c: scr.CATEGORY_LABEL.get(c, c), key="rank_category_filter",
+        )
+        # Resolved through a mirror: under st.navigation a widget key is
+        # discarded when the reader visits another page, and `default` is what
+        # brings the choice back.
+        sort_by = st.segmented_control(
+            "Sort by", list(scr.SORTS), default=scr.SORTS[_mirror(_SORT_MIRROR, len(scr.SORTS))],
+            required=True, key="rank_sort_by",
+        ) or scr.SORTS[0]
+        st.session_state[_SORT_MIRROR] = scr.SORTS.index(sort_by)
+        basis = st.segmented_control(
+            "Returns", list(BASES), default=BASES[_mirror(_BASIS_MIRROR, len(BASES))],
+            required=True, key="rank_basis",
+        ) or BASES[0]
+        st.session_state[_BASIS_MIRROR] = BASES.index(basis)
+        st.caption("Click a column header in the table to sort by it too.")
+        st.button("Reset", key="rank_filters_reset", type="tertiary", on_click=_reset_screener_filters)
 
-frame = decisions
-category = universes.get(picked or list(universes)[0])
-if category:
-    frame = frame[frame["category"] == category]
-if only_buyable and "tradeable" in frame:
-    frame = frame[frame["tradeable"]]
-if search.strip():
-    frame = frame[frame["exposure"].str.contains(search.strip(), case=False, na=False, regex=False)]
+if st.session_state.pop("_scr_open_exposure", False):
+    st.switch_page("views/4_Exposure.py")
 
-# Quadrant counts and what the portfolio holds, as one glanceable line.
-held = frame[frame["model_action"].isin(HELD_ACTIONS)]["exposure"].tolist()
-stages = frame["stage"].value_counts()
-html_block(
-    '<div class="ds-legend">'
-    + "".join(chip(f"{stage} {int(stages.get(stage, 0))}", tone) for stage, tone in STAGE_TONE.items())
-    + (f"<span>Held: <b>{', '.join(held)}</b></span>" if held else "<span>No holding in this view</span>")
-    + "</div>"
-)
+relative = basis == BASES[1]
+table = scr.display_frame(decisions, levels, funds, hurdle, relative=relative)
+rows = masks.get(preset, masks[scr.DEFAULT_PRESET])
+if selected_search in by_index:
+    rows = rows & decisions["exposure_id"].astype(str).isin(by_index[selected_search])
+if categories:
+    rows = rows & decisions["category"].isin(categories)
+view = scr.sort_frame(table[rows], sort_by)
 
-absolute = basis != "vs Nifty 50"
-prefix, suffix = ("return_", "") if absolute else ("relative_", " vs N50")
-periods = [f"{p}{suffix}" for p in ("1M", "3M", "6M", "12M")]
-table = pd.DataFrame(
-    {
-        "Rank": pd.to_numeric(frame["rank"], errors="coerce").to_numpy(),
-        "Exposure": frame["exposure"].to_numpy(),
-        "Category": frame["category"].map({"sector": "Sector", "thematic": "Theme"}).to_numpy(),
-        **{
-            label: pd.to_numeric(frame[f"{prefix}{p}"], errors="coerce").to_numpy()
-            for label, p in zip(periods, ("1M", "3M", "6M", "12M"))
-        },
-        "Score": pd.to_numeric(frame["momentum_z"], errors="coerce").to_numpy(),
-        "Portfolio": frame["model_action"].to_numpy(),
-        "Quadrant (display only)": frame["stage"].to_numpy(),
-    }
-).sort_values("Rank", na_position="last", kind="mergesort").reset_index(drop=True)
+key, ascending = scr.SORT_KEYS[sort_by]
+render_screener_table(view, panel, sorted_by=key, ascending=ascending,
+                      group_labels={"Momentum": "Momentum · vs Nifty 50"} if relative else None)
 
-section(f"{len(table)} exposures", "Sorted by score · click a header to re-sort · the header stays in view while you scroll")
-show_table(
-    tinted(table, periods, cap=0.30 if absolute else 0.20),
-    hide_index=True,
+# Export every column the ranking carries, the on-screen ones first, so the
+# file can be audited against the score behind the rank.
+shown = view.drop(columns=["Sub"])
+extra = decisions.loc[view.index, [c for c in decisions.columns if c not in shown.columns]]
+export_df = pd.concat([shown, extra], axis=1)
+c_export.download_button(
+    "Export CSV",
+    export_df.to_csv(index=False).encode(),
+    f"sector_rotation_screener_{as_of:%Y%m%d}.csv",
+    "text/csv",
+    key="dl_rank_csv",
+    icon=":material/download:",
+    help=f"The {len(view)} exposures shown, with all {export_df.shape[1]} ranking columns.",
     width="stretch",
-    height=min(40 + 35 * len(table), 760),
-    column_config={
-        "Rank": st.column_config.NumberColumn(
-            format="%d", width="small", pinned=True,
-            help="Score rank across the whole universe at the latest session (provisional between rebalances; "
-            "the portfolio ranks only buyable exposures, at month end).",
-        ),
-        "Exposure": st.column_config.TextColumn(width="medium", pinned=True),
-        "Category": st.column_config.TextColumn(width="small"),
-        **{p: st.column_config.NumberColumn(format="percent", width="small") for p in periods},
-        "Score": st.column_config.ProgressColumn(
-            format="%+.2f", width="small", min_value=float(min(table["Score"].min(), -1.0)),
-            max_value=float(max(table["Score"].max(), 1.0)),
-            help="Weighted z-scores of the non-overlapping 1M, 3M-1M, 6M-3M and 12M-6M log returns. "
-            "0 is the universe average, not a zero return.",
-        ),
-        "Portfolio": st.column_config.TextColumn(width="small", help="What the target portfolio does with it"),
-        "Quadrant (display only)": st.column_config.TextColumn(
-            width="small", help="RRG quadrant of the RS line against its own 52-week average. It decides nothing.",
-        ),
-    },
-)
-note(
-    "<b>Rank orders the score; it is not an instruction.</b> The portfolio holds the top buyable names at "
-    "month end, keeps a holding while it stays inside the retention buffer, and only while its 12-month "
-    "return beats cash. See the Portfolio page."
 )
 
-with st.expander("RRG Quadrant View (Display Context)", expanded=False):
-    stage_legend()
-    st.plotly_chart(rrg_scatter(frame), width="stretch", config=CHART_CONFIG)
-    st.caption(
-        "Where each RS line sits against its own 52-week average (x) and how fast that is changing (y). "
-        "Hover for a crosshair. Shown for context; the strategy's decisions do not use it."
+
+# ── Movement since the last rebalance (Paresh's render_top50_changes) ───────
+def render_rank_changes(frame: pd.DataFrame) -> None:
+    risers, fallers = scr.movers(frame)
+    if risers.empty and fallers.empty:
+        return
+    since = f"the {rebalance:%d %b} rebalance" if rebalance is not None else "the last rebalance"
+
+    def esc(value) -> str:
+        return html.escape(str(value))
+
+    def row_html(i: int, row, extra: bool = False) -> str:
+        delta = int(row["Rank Δ"])
+        tone = "positive" if delta > 0 else ("negative" if delta < 0 else "flat")
+        ret = signed_pct(None if pd.isna(row["1M"]) else float(row["1M"]))
+        ret_tone = "negative" if ret.startswith("−") else ("flat" if ret == "—" else "positive")
+        return (
+            f'<div class="t50-row{" t50-extra" if extra else ""}">'
+            f'<span class="t50-num">{i}</span>'
+            f'<span class="t50-stock-cell"><a class="t50-stock" href="{exposure_href(row["exposure_id"])}" '
+            f'target="_self">{esc(row["Exposure"])}</a></span>'
+            f'<span class="t50-cell t50-change"><span class="t50-delta {tone}">{"+" if delta > 0 else ""}{delta}'
+            '</span></span>'
+            f'<span class="t50-cell t50-rank">{int(row["Portfolio rank"])}</span>'
+            f'<span class="t50-cell t50-return {ret_tone}">{esc(ret)}</span>'
+            "</div>"
+        )
+
+    def card(title: str, subtitle: str, icon: str, tone: str, rows) -> str:
+        # A hidden checkbox holds the open/closed state; the "View all" button
+        # under the rows is its label, so it works without JS.
+        rows = list(rows)
+        toggle_id = f"t50-more-{tone}"
+        more = len(rows) > 5
+        toggle_label = (
+            '<span class="t50-when-closed">View all <span>→</span></span>'
+            '<span class="t50-when-open">Show less <span>↑</span></span>'
+        )
+        head = ('<div class="t50-col-head"><span>#</span><span>Exposure</span><span>Rank change</span>'
+                "<span>New rank</span><span>1M %</span></div>")
+        body = '<div class="t50-table-wrap"><div class="t50-table">' + head
+        body += "".join(row_html(i, row) for i, row in enumerate(rows[:5], 1))
+        body += "".join(row_html(i, row, extra=True) for i, row in enumerate(rows[5:], 6))
+        body += "</div></div>"
+        if more:
+            body += f'<label class="t50-more" for="{toggle_id}">{toggle_label}</label>'
+        return (
+            f'<section class="t50-card t50-{tone}">'
+            + (f'<input type="checkbox" class="t50-toggle" id="{toggle_id}">' if more else "")
+            + '<div class="t50-card-head"><div class="t50-card-heading">'
+            f'<div class="t50-icon" aria-hidden="true">{icon}</div>'
+            f"<div><h2>{esc(title)}</h2><p>{esc(subtitle)}</p></div></div>"
+            "</div>" + body + "</section>"
+        )
+
+    n = int(frame["Portfolio rank"].notna().sum())
+    st.html(
+        '<div id="t50-movement" class="t50-grid">'
+        + card("Biggest Risers", f"Largest rank gains since {since}", "↑", "jump", risers.to_dict("records"))
+        + card("Biggest Fallers", f"Largest rank losses since {since}", "↓", "left", fallers.to_dict("records"))
+        + f'</div><div class="t50-note">Rank among the {n} tradeable exposures, the ranking the portfolio '
+        "acts on.</div>"
     )
 
-with st.expander("Every model input", expanded=False):
-    audit_frame(frame, key="rankings_audit")
+
+render_rank_changes(table)
+
+with st.expander("RRG view", expanded=False):
+    from app.components.charts import CHART_CONFIG, rrg_scatter
+    from app.components.theme import stage_legend
+
+    stage_legend()
+    st.plotly_chart(rrg_scatter(decisions.loc[view.index]), width="stretch", config=CHART_CONFIG)
+    st.caption("Display only: the strategy's decisions do not use the quadrant.")
