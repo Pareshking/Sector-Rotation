@@ -1763,11 +1763,10 @@ def render_saas_table(
         st.info("No data available to display.")
         return
 
-    n_rows = len(df)
-    if max_height is None:
-        table_h = min(600, (n_rows * 44) + 48)
-    else:
-        table_h = max_height
+    # Size the frame to its rows (44px each + header); max_height only caps it,
+    # so a short table doesn't sit in a tall, mostly empty iframe.
+    natural_h = (len(df) * 44) + 48
+    table_h = min(600 if max_height is None else max_height, natural_h)
 
     headers_html = []
     for col in df.columns:
