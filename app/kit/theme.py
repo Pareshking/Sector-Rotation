@@ -479,7 +479,17 @@ def inject_custom_css() -> None:
         .mkt-index strong { font-family: var(--font-display); font-size: 15px; }
         .mkt-distance { gap: 5px; }
         .mkt-distance strong { font-size: 12.5px; }
-        
+        /* Our labels are longer than Paresh's, so between the phone breakpoint
+           and a wide desktop the items shrank below their text and ran into
+           each other. Items keep their width at every size; a strip wider than
+           the screen scrolls sideways, as Paresh's does on a phone. */
+        .mkt-snapshot {
+            overflow-x: auto; overflow-y: hidden;
+            scrollbar-width: none; -ms-overflow-style: none;
+        }
+        .mkt-snapshot::-webkit-scrollbar { display: none; }
+        .mkt-item { flex: 0 0 auto; }
+
         @media (min-width: 1101px) {
             [class*="st-key-app_nav_menu_"] { display: none !important; }
         }
