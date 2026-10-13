@@ -1763,6 +1763,9 @@ _PER_SHARE_PRICE_KEYS = ("CMP", "PRICE", "STOP LOSS", "CHAND", "ENTRY", "EXIT")
 _AGGREGATE_MONEY_KEYS = ("VALUE", "CAPITAL", "MCAP", "P&L", "DAY P&L")
 
 
+_ALIGN_RE = re.compile(r'<td class="td-(left|center|right)')
+
+
 def render_saas_table(
     df: pd.DataFrame,
     max_height: int | None = None,
@@ -1825,6 +1828,7 @@ def render_saas_table(
 
     portfolio_class = "portfolio" if variant == "portfolio" else ""
     rows_html = []
+    cell_align: dict[int, str] = {}  # column index -> alignment of its first real value
     # Plain dicts rather than iterrows(): a Series per row is ~3.4x the cost
     # over a large frame and nothing here needs one. Unlike the screener table
     # this renderer takes arbitrary frames, some of which are homogeneously
@@ -2066,7 +2070,18 @@ def render_saas_table(
             else:
                 cells_html.append(f'<td class="td-left">{_esc(str(val))}</td>')
 
+        for i, cell in enumerate(cells_html):
+            if i not in cell_align and 'text-muted">—<' not in cell:
+                found = _ALIGN_RE.search(cell)
+                if found:
+                    cell_align[i] = found.group(1)
         rows_html.append(f'<tr class="screener-row">{"".join(cells_html)}</tr>')
+
+    # A header sits the way its column's values do. The name lists above only
+    # guess; a text column they miss (Exposure, Covers) got a right-aligned
+    # header over left-aligned text and looked shifted one column over.
+    for i, align in cell_align.items():
+        headers_html[i] = re.sub(r'class="th-\w+"', f'class="th-{align}"', headers_html[i], count=1)
 
     saas_page_html = f"""<!DOCTYPE html>
 <html>
