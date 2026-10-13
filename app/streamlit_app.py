@@ -20,6 +20,26 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
+def _drop_stale_modules() -> None:
+    """Re-import app/ and src/ after a deploy changed them.
+
+    Streamlit Cloud pulls each push into the running server and reruns the
+    page scripts, but modules they import stay as first loaded: a change to
+    the kit's stylesheet or to src/ did not reach the live site until a
+    reboot. When any .py file under app/ or src/ has changed since the last
+    run, those modules are dropped so this run imports them fresh.
+    """
+    stamp = sum(p.stat().st_mtime_ns for folder in ("app", "src") for p in (ROOT / folder).rglob("*.py"))
+    previous = getattr(sys, "_sector_rotation_code_stamp", None)
+    sys._sector_rotation_code_stamp = stamp
+    if previous is not None and previous != stamp:
+        for name in [n for n in sys.modules if n == "app" or n.startswith(("app.", "src.")) or n == "src"]:
+            del sys.modules[name]
+
+
+_drop_stale_modules()
+
 st.set_page_config(
     page_title="Dual Momentum",
     page_icon=":material/donut_small:",
