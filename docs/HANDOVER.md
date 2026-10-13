@@ -38,6 +38,18 @@ The rules are strategy v1.1, in `src/config/strategy.json`:
 
 Tests: `python -m pytest -q` → 359 passed on #81.
 
+## 14 Oct, later (PRs #82–#86)
+
+| PR | What |
+| --- | --- |
+| #82 | Header market strip: items keep their width and the strip scrolls sideways (they overlapped at ~800px) |
+| #83 | Kit tables: each header takes its column's alignment (Method and Data Health headers looked one column over) |
+| #84 | Paresh's current KPI strip ported verbatim: tiles share the row, shorter, names smaller |
+| #85 | Model book forward recording from Nov 2026 (see Open items 5) |
+| #86 | Live deploys: the app re-imports `app/` and `src/` when a push changes them; before this, kit and `src/` changes needed a reboot to go live |
+
+Tests: 363 passed on #86.
+
 ## Owner's decisions (settled; don't re-ask)
 
 - **Look:** white, clean, minimal, "exactly like Paresh". The owner rejected imitations: port Paresh's own code element by element and swap only the data. Light theme only. Keep text short; the owner said the site "looks like a text site".
@@ -79,4 +91,5 @@ Tests: `python -m pytest -q` → 359 passed on #81.
 - **Headless check of a page:** `streamlit.testing.v1.AppTest.from_file("app/views/<page>.py").run()`. Kit tables render in iframes; the tests read them with `_iframe_text` in `tests/test_ui.py`.
 - **Paresh's table renderer** (`app/kit/theme.py: render_saas_table`) formats by column name and raises on an undeclared percentage column. Use Paresh's names, or declare the column in `FRACTION_PERCENT_COLUMNS` / `SCALED_PERCENT_COLUMNS`.
 - **Triggering the pipeline:** `gh workflow run data_pipeline.yml --ref main`. It takes about 3 minutes and commits data to `main`.
+- **Deploys:** Streamlit Cloud pulls every push but keeps imported modules loaded; since #86 the entry script drops them when any `.py` under `app/` or `src/` changes. If a change still doesn't show, use **Manage app → Reboot**.
 - **Sessions get auto-archived** when their PR merges, so the owner may think a chat was deleted. Project memory is under `~/.claude/projects/C--Users-Quali-Sector-Rotation/memory/`.
