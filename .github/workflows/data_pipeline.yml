@@ -46,6 +46,12 @@ jobs:
         # metadata.json still wrote a report, but a bad dataset committed
         # anyway. A red run tonight beats a wrong number on the dashboard.
         run: python -m pipeline.run_pipeline --mode live --strict
+      - name: Record closed model-book months
+        # Append-only: a month already recorded is never rewritten. A failure
+        # here skips tonight's record (the next run catches up) but never
+        # stops the data from publishing.
+        continue-on-error: true
+        run: python tools/record_book.py
       - name: Detect decision changes
         id: alerts
         continue-on-error: true

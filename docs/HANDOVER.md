@@ -61,7 +61,7 @@ Tests: `python -m pytest -q` → 359 passed on #81.
 3. **HDFCNIMEG (HDFC Nifty Metal ETF)** is left out because AMFI publishes no ISIN for scheme 154504. Add it when one appears.
 4. **The NSE ETF snapshot** is often refused from GitHub (403). Carry-forward covers up to 14 days; past that, turnover and premium go blank. A durable fix would be another snapshot source (e.g. the nsearchives CSVs) or a self-hosted runner.
 5. **Model book:**
-   - Forward recording, i.e. freezing each month once closed so later data revisions cannot rewrite it, is **not built**. Every month is a fresh backfilled replay.
+   - Forward recording is built (PR #85): `tools/record_book.py` runs nightly and appends each closed month from Nov 2026 to `data/processed/model_book_record.csv` (append-only). The app pins the book to it (`src/portfolio/record.py`) and labels those months *Recorded*. The first row lands after the first nightly run in Dec 2026; check it then.
    - Vehicle choice uses tracking measured over the full history, a mild look-ahead.
 6. **Remaining differences from Paresh:**
    - **Screener:** Paresh's stock columns (52W high, 50 EMA, volume) are replaced by a Model group. Column widths follow the content.
