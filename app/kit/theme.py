@@ -756,19 +756,21 @@ def inject_custom_css() -> None:
         }
 
         /* ── Page kit (src/ui/page_kit.py): every other page ───────────── */
-        /* Portfolio KPI strip: centered, icon-free frozen design.
-           Desktop keeps six equal cards; tablet uses a 2x3 grid; phone stacks
-           one card per row. */
+        /* Page KPI strip: centered, icon-free. However many tiles a page
+           has (4 on Sectors, Actions, Breadth; 6 on Portfolio, Backtest),
+           they share the row: a fixed 6-column grid left two empty columns
+           beside four tiles, and squeezed long names into 4-line tiles
+           (owner, 13 Oct). Narrower screens wrap to as many as fit. */
         .mkt-strip.pg-strip {
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
         }
         .mkt-strip.pg-strip .ms-tile {
             align-items: center;
             justify-content: center;
             text-align: center;
             min-width: 0;
-            min-height: 152px;
-            padding: 18px 16px;
+            gap: 4px;
+            padding: 14px 16px;
         }
         .mkt-strip.pg-strip .ms-k,
         .mkt-strip.pg-strip .ms-v,
@@ -776,28 +778,25 @@ def inject_custom_css() -> None:
             text-align: center;
             width: 100%;
         }
-        .mkt-strip.pg-strip .ms-k { font-size: 14px; }
-        .mkt-strip.pg-strip .ms-v { font-size: 28px; }
-        .mkt-strip.pg-strip .ms-s { font-size: 14px; }
-        .mkt-strip.pg-strip .ms-s:empty { display: none; }
-
-        @media (min-width: 641px) and (max-width: 1279px) {
-            .mkt-strip.pg-strip {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
+        .mkt-strip.pg-strip .ms-k { font-size: 13px; }
+        .mkt-strip.pg-strip .ms-v { font-size: 26px; }
+        /* A name, not a figure (an industry): smaller, at most two lines. */
+        .mkt-strip.pg-strip .ms-v.ms-name {
+            font-size: 19px; line-height: 1.2;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
+        .mkt-strip.pg-strip .ms-s { font-size: 12.5px; line-height: 1.35; color: #5E6878; }
+        .mkt-strip.pg-strip .ms-s:empty { display: none; }
 
         @media (max-width: 640px) {
             .mkt-strip.pg-strip {
-                grid-template-columns: 1fr;
+                grid-template-columns: 1fr 1fr;
             }
-            .mkt-strip.pg-strip .ms-tile {
-                min-height: 126px;
-                padding: 18px 14px;
-            }
-            .mkt-strip.pg-strip .ms-k { font-size: 13px; }
-            .mkt-strip.pg-strip .ms-v { font-size: 24px; }
-            .mkt-strip.pg-strip .ms-s { font-size: 13px; }
+            .mkt-strip.pg-strip .ms-tile { padding: 12px 10px; }
+            .mkt-strip.pg-strip .ms-k { font-size: 12px; }
+            .mkt-strip.pg-strip .ms-v { font-size: 21px; }
+            .mkt-strip.pg-strip .ms-v.ms-name { font-size: 16px; }
+            .mkt-strip.pg-strip .ms-s { font-size: 11.5px; }
         }
         .mkt-strip .warn { color: #B54708; }
         .pg-note {
