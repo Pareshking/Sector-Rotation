@@ -80,6 +80,10 @@ def test_display_frame_sub_line_hurdle_and_status():
     assert out.loc[1, "Sub"] == "Sector · Nifty Pharma · 2 funds"
     assert out.loc[2, "Sub"] == "Sector · Nifty Metal · 1 fund"
     assert out.loc[4, "Sub"] == "Theme · No fund"  # no index name: never "None"
+    priced = scr.display_frame(d.assign(value_type=["TRI", "CLOSE", "TRI", "TRI", "TRI"]), levels,
+                               pd.Series({"a": 2}), hurdle=0.07)
+    assert priced.loc[1, "Sub"] == "Sector · Nifty Pharma · 2 funds · price index"
+    assert "price index" not in priced.loc[2, "Sub"]
     assert out["Portfolio"].tolist() == ["No fund", "Not held", "HOLD", "HOLD", "Not held"]
     assert round(out.loc[1, "12M vs cash"], 6) == 0.13
     relative = scr.display_frame(d, levels, pd.Series(dtype=int), hurdle=None, relative=True)

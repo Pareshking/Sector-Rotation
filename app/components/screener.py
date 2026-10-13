@@ -114,9 +114,14 @@ def display_frame(decisions: pd.DataFrame, levels: pd.Series, funds: pd.Series, 
     prefix = "relative_" if relative else "return_"
     n_funds = ids.map(funds).fillna(0).astype(int) if len(funds) else pd.Series(0, index=decisions.index)
     category = decisions.get("category", pd.Series("", index=decisions.index)).map(CATEGORY_LABEL).fillna("")
+    # A CLOSE series is a price index (dividends left out, e.g. BSE Insurance),
+    # so its returns are not comparable with a TRI row's without saying so.
+    price_only = decisions.get("value_type", pd.Series("", index=decisions.index)).astype(str).str.upper() == "CLOSE"
     sub = [
-        " · ".join(p for p in (c, _dash(b), ("1 fund" if n == 1 else f"{n} funds") if n else "No fund") if p)
-        for c, b, n in zip(category, decisions.get("benchmark", pd.Series("", index=decisions.index)), n_funds)
+        " · ".join(p for p in (c, _dash(b), ("1 fund" if n == 1 else f"{n} funds") if n else "No fund",
+                               "price index" if close else "") if p)
+        for c, b, n, close in zip(category, decisions.get("benchmark", pd.Series("", index=decisions.index)),
+                                  n_funds, price_only)
     ]
     r12_abs = _num(decisions.get("return_12M"))
     out = pd.DataFrame({

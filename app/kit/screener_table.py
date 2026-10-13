@@ -230,8 +230,8 @@ td.c-path{padding-left:14px}
   th:nth-child(2),td.c-stock{left:34px;box-shadow:none;max-width:150px}
   td.c-stock .sym{font-size:14px;overflow:hidden;text-overflow:ellipsis;max-width:140px}
   td.c-stock .sub{display:block;font-size:12px;max-width:130px}
-  tr.grp-row{display:none}
-  thead tr.hdr th{top:0}
+  .wrap tr.grp-row{display:none}
+  .wrap thead tr.hdr th{top:0}
   td.c-path{padding-left:0}
   td.c-path svg{width:54px}
   th .lbl-d{display:none}

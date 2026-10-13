@@ -207,19 +207,40 @@ def test_ledger_tables_escape_reasons_and_dash_gaps():
 
 @needs_data
 def test_the_rankings_filter_counts_come_from_the_data():
+    """The Screener's preset pills count rows of the data; Tradeable is the default."""
     import pandas as pd
 
     summary = pd.read_parquet(ROOT / "data" / "processed" / "summary_rankings.parquet")
     counts = summary["category"].value_counts()
     at = _render("2_Rankings.py")
-    labels = [list(group.options) for group in at.button_group]
-    assert [f"All ({len(summary)})", f"Sectors ({counts['sector']})", f"Themes ({counts['thematic']})"] in labels
-    table = at.dataframe[0].value
-    assert list(table.columns[:3]) == ["Rank", "Exposure", "Category"]
-    assert list(table.columns[3:8]) == ["1M", "3M", "6M", "12M", "Score"]
-    assert "Quadrant (display only)" in table.columns
-    assert table["Rank"].is_monotonic_increasing
-    assert [e.label for e in at.expander][0] == "RRG Quadrant View (Display Context)"
+    assert not at.exception
+    presets = list(at.button_group[0].options)
+    assert presets[0].startswith("Tradeable ") and presets[1] == f"All {len(summary)}"
+    assert f"Sectors {counts['sector']}" in presets and f"Themes {counts['thematic']}" in presets
+    assert at.session_state["rank_quick_pills"] == "Tradeable"
+    assert [list(g.options) for g in at.button_group[1:]] == [
+        ["Sector", "Theme"], ["Rank", "Rank Δ", "1M", "3M", "6M", "12M", "Max DD"], ["Absolute", "vs Nifty 50"]]
+    assert at.selectbox[0].placeholder == "Search exposure or index"
+    assert [e.label for e in at.expander] == ["RRG view"]
+
+
+@needs_data
+def test_the_screener_table_shows_every_tradeable_exposure_by_rank():
+    from app.components import screener as scr
+    from app.data import current_regime, load_decisions, load_index_panel, vehicle_frame
+    from app.kit.screener_table import table_html
+
+    decisions = load_decisions()
+    panel, _ = load_index_panel()
+    regime = current_regime()
+    table = scr.display_frame(decisions, panel.ffill().iloc[-1], scr.fund_counts(vehicle_frame(), panel.index.max()),
+                              regime.cash_12m if regime else None)
+    view = scr.sort_frame(table[decisions["tradeable"].astype(bool)], "Rank")
+    markup = table_html(view, panel)
+    assert markup.count("<tr data-stock=") == int(decisions["tradeable"].sum())
+    assert view["Rank"].is_monotonic_increasing
+    body = markup[markup.index("<tbody>"):markup.index("</tbody>")]
+    assert "None" not in body and ">nan" not in body
 
 
 @needs_data
@@ -232,6 +253,31 @@ def test_the_evidence_page_leads_with_the_live_rules_net_of_costs():
     assert any(t.label == "Include back-calculated index history" for t in at.toggle)
     comparison = at.dataframe[0].value
     assert set(comparison["Back-calculated history"]) == {"Included", "Excluded"}
+
+
+@needs_data
+def test_a_screener_row_link_opens_that_exposure():
+    """A Screener row navigates to Exposure?exposure=<id>; the page selects it once."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(VIEWS / "4_Exposure.py"), default_timeout=300)
+    at.query_params["exposure"] = "metal"
+    at.run()
+    assert not at.exception
+    assert at.selectbox(key="detail_exposure").value == "Metals"
+    at.selectbox(key="detail_exposure").set_value("Pharma").run()
+    assert at.selectbox(key="detail_exposure").value == "Pharma"  # not undone by the link
+
+
+@needs_data
+def test_choosing_an_exposure_in_the_screener_search_opens_its_page():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(ROOT / "app" / "streamlit_app.py"), default_timeout=300).run()
+    assert not at.exception
+    at.selectbox(key="rank_search_predictive").set_value("Defence").run()
+    assert not at.exception
+    assert at.selectbox(key="detail_exposure").value == "Defence"
 
 
 @needs_data
