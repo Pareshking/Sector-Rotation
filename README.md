@@ -9,7 +9,7 @@ Live app: <https://dualmomentum.streamlit.app>
 ## Architecture
 
 ```text
-NSE / NiftyIndices  (via jugaad-data adapter)        NSE / MFAPI / AMFI / Yahoo
+NSE / NiftyIndices (jugaad-data) + BSE Index Services   NSE / MFAPI / AMFI / Yahoo
           |                                                   |
           v                                                   v
 Universe Registry -> Exposure -> canonical Nifty benchmark   ETF price + NAV
@@ -39,18 +39,27 @@ Display only: Mansfield RS, RRG stage, durability analytics (src/quantitative)
 
 ## Application map
 
+The look is the owner's other app, Paresh (<https://paresh.streamlit.app>): its own UI code is
+ported into `app/kit/` (stylesheet, header, page kit, sortable tables, TradingView Lightweight
+Charts and Highcharts, vendored in `app/kit/vendor`). Light theme only. Missing values show "—".
+
 | Page | Question it answers |
 | --- | --- |
-| **Portfolio** | What should I hold now, what must I trade, at what cost, and when is the next rebalance? One regime chip (Nifty 50 TRI vs the liquid fund over 12 months, context only), the target portfolio with the best vehicle, target and held weights, action, estimated cost and days to build, the reason for every line, and the names on the edge of the retention buffer. |
-| **Rankings** | Where does every sector and theme stand on the strategy's score today? One sortable table filtered All / Sectors / Themes, with the RRG quadrant view in a collapsed expander (display context only). |
-| **Evidence** | Would the live rules have beaten Nifty 50 TRI after costs, and is that evidence? Net CAGR, total return, excess, drawdown and the **Deflated Sharpe ratio**; with and without back-calculated history; rolling 12-month windows; early vs recent. The parameter grid sits in a collapsed "Parameter Sensitivity (Unvalidated)" expander. |
-| **Exposure** | For one exposure: the decision, the relative-strength path, and the funds that implement it — including the vehicle the Portfolio page would choose and why. |
-| **Data Health** | Where every series came from, what it actually is, what is missing, which index history is back-calculated (NSE launch dates), and which liquid fund supplies the cash return. |
-| **Method** | The complete theory in one page: score, portfolio rule, stages, backtest, provenance. |
+| **Screener** (home) | Where does every sector and theme stand on the strategy's score today? Paresh's screener table: rank, 1M Δ / 3M Δ rank change, classification (sector/theme, index, fund count), 1M–12M returns, 12M vs cash, score, portfolio status, quadrant (display only), 12-month path. Opens on **tradeable** exposures; search, preset pills, filters, export; risers and fallers. |
+| **Portfolio** | The ₹20 lakh **model book** (`src/portfolio/book.py`): the live rules' decision chain bought and held in the chosen funds at NAV, from Nov 2022 (every month backfilled; the running month MTD). Readings, current book, sector exposure and correlation, equity & drawdown, calendar returns, trades, rebalances, export. |
+| **Actions** | What the next rebalance would do if prices hold: Sell / Buy / Hold with cushions (room inside the retention buffer, 12M return above the cash hurdle), "My holdings" mode, a Kite basket CSV. Computed with the strategy's own `construct_target_portfolio`. |
+| **Exposure** | One exposure: decision, index level and drawdown, RS line vs Nifty 50, volatility, durability, every fund (ETF vs index fund) and position sizing. `?exposure=<id>` opens one directly. |
+| **Evidence** | Would the live rules have beaten Nifty 50 TRI after costs, and is that evidence? Net CAGR, total return, excess, drawdown, **Deflated Sharpe**; with/without back-calculated history; rolling 12-month windows; early vs recent; the parameter grid in a collapsed "Parameter Sensitivity (Unvalidated)" expander. |
+| **Data Health** | Where every series came from and what it is (TRI or price index), what is missing, launch dates and back-calculated history, the liquid fund, the NSE ETF snapshot status. |
+| **Method** | The theory: score, portfolio rule, worked example reproducing the live score, rotation (display only), backtest, data sources. |
 
 Every page is read-only. The app performs no downloads at page load; it reads prepared files
 from `data/processed/` and builds the target portfolio from them with `src/portfolio`, the same
 code the backtest runs.
+
+**Model book vs backtest.** The backtest accounts in index returns; the model book buys the
+funds. Over Nov 2022 – Oct 2026 the book made about +135% against +169% in index terms, mostly
+because the only PSE fund before mid-2025 was Bharat 22 ETF, which tracks a different index.
 
 ## Data hierarchy
 
