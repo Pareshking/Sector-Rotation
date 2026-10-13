@@ -19,7 +19,10 @@ HELD = {"BUY", "HOLD", "TRIM"}
 # from the counts on every run.
 PRESETS = ("Tradeable", "All", "Held", "Top", "Beating cash", "Sectors", "Themes")
 DEFAULT_PRESET = "Tradeable"
-SORTS = ("Rank", "Rank Δ", "1M", "3M", "6M", "12M", "Max DD")
+SORTS = ("Rank", "1M Δ", "1M", "3M", "6M", "12M", "Max DD 3M")
+# Presets drawn from the tradeable set number their rows by the portfolio's own
+# ranking (1, 2, 3 …); the rest use the universe rank.
+PORTFOLIO_RANKED = {"Tradeable", "Held", "Top"}
 
 
 def _num(series) -> pd.Series:
@@ -47,9 +50,52 @@ def portfolio_rank(decisions: pd.DataFrame) -> pd.Series:
     return ids.map(ranks).astype(float).set_axis(decisions.index)
 
 
-def rank_change(decisions: pd.DataFrame) -> pd.Series:
-    """Places gained since the last rebalance (+ = climbed); NaN without both ranks."""
-    return _num(decisions["decision_rank"]) - portfolio_rank(decisions)
+def past_ranks(chain: list, months_back: int) -> pd.Series:
+    """The portfolio's rank of each exposure ``months_back`` month-end decisions ago.
+
+    ``chain`` is the backtest's decision chain (``load_backtest().decisions``,
+    one TargetPortfolio per month-end, the last being the latest rebalance).
+    Its ``ranking["rank"]`` is ranked over the exposures buyable on that date,
+    the same set ``portfolio_rank`` ranks over today. Empty when the chain is
+    shorter than that.
+    """
+    if not chain or len(chain) < months_back:
+        return pd.Series(dtype=float)
+    ranking = chain[-months_back].ranking
+    if ranking is None or "rank" not in ranking:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(ranking["rank"], errors="coerce").astype(float).rename(lambda i: str(i))
+
+
+def max_drawdown(panel: pd.DataFrame, sessions: int = 63) -> pd.Series:
+    """Deepest fall from a running peak over the last ``sessions`` sessions (63 ≈ 3 months)."""
+    if panel is None or panel.empty:
+        return pd.Series(dtype=float)
+    window = panel.iloc[-min(sessions, len(panel)):].apply(pd.to_numeric, errors="coerce")
+    dd = (window / window.cummax() - 1.0).min()
+    return dd.where(window.notna().sum() >= 2).rename(lambda i: str(i))
+
+
+# All-caps words in NSE index names that are not ordinary words.
+_KEEP_UPPER = {"IT", "PSU", "PSE", "CPSE", "FMCG", "MNC", "EV", "BSE", "TRI", "ETF"}
+_SPECIAL = {"MIDSMALL": "MidSmall", "REITS": "REITs", "INVITS": "InvITs"}
+
+
+def index_name(name) -> str:
+    """'NIFTY MIDSMALL IT & TELECOM' → 'Nifty MidSmall IT & Telecom'; mixed-case names stay as they are."""
+    text = _dash(name).strip()
+    if not text or text != text.upper():
+        return text
+
+    def word(w: str) -> str:
+        core = w.strip("()")
+        if core in _SPECIAL:
+            return w.replace(core, _SPECIAL[core])
+        if core in _KEEP_UPPER:
+            return w
+        return "-".join(part.capitalize() for part in w.split("-"))
+
+    return " ".join(word(w) for w in text.split(" "))
 
 
 def preset_masks(decisions: pd.DataFrame, hurdle: float | None, buffer: int) -> dict[str, pd.Series]:
@@ -108,8 +154,16 @@ def _dash(value) -> str:
 
 
 def display_frame(decisions: pd.DataFrame, levels: pd.Series, funds: pd.Series, hurdle: float | None,
-                  relative: bool = False) -> pd.DataFrame:
-    """The table's rows: one per exposure, in the columns app/kit/screener_table.py reads."""
+                  relative: bool = False, *, ranks_1m: pd.Series | None = None,
+                  ranks_3m: pd.Series | None = None, drawdown_3m: pd.Series | None = None,
+                  portfolio_ranked: bool = False) -> pd.DataFrame:
+    """The table's rows: one per exposure, in the columns app/kit/screener_table.py reads.
+
+    ``ranks_1m`` / ``ranks_3m`` are the portfolio's ranks one and three
+    month-end decisions ago (``past_ranks``); 1M Δ and 3M Δ compare them with
+    today's tradeable rank. ``portfolio_ranked`` numbers the Rank column by
+    that tradeable rank instead of the universe rank.
+    """
     ids = decisions["exposure_id"].astype(str)
     prefix = "relative_" if relative else "return_"
     n_funds = ids.map(funds).fillna(0).astype(int) if len(funds) else pd.Series(0, index=decisions.index)
@@ -118,25 +172,41 @@ def display_frame(decisions: pd.DataFrame, levels: pd.Series, funds: pd.Series, 
     # so its returns are not comparable with a TRI row's without saying so.
     price_only = decisions.get("value_type", pd.Series("", index=decisions.index)).astype(str).str.upper() == "CLOSE"
     sub = [
-        " · ".join(p for p in (c, _dash(b), ("1 fund" if n == 1 else f"{n} funds") if n else "No fund",
+        " · ".join(p for p in (c, index_name(b), ("1 fund" if n == 1 else f"{n} funds") if n else "No fund",
                                "price index" if close else "") if p)
         for c, b, n, close in zip(category, decisions.get("benchmark", pd.Series("", index=decisions.index)),
                                   n_funds, price_only)
     ]
     r12_abs = _num(decisions.get("return_12M"))
+    universe = _num(decisions["rank"])
+    tradeable_rank = portfolio_rank(decisions)
+
+    def then(ranks: pd.Series | None) -> pd.Series:
+        if ranks is None:
+            return pd.Series(np.nan, index=decisions.index)
+        return ids.map(ranks).astype(float).set_axis(decisions.index)
+
+    was_1m = then(ranks_1m) if ranks_1m is not None else _num(decisions["decision_rank"])
+    was_3m = then(ranks_3m)
     out = pd.DataFrame({
         "exposure_id": ids.to_numpy(),
-        "Rank": _num(decisions["rank"]).to_numpy(),
+        "Rank": (tradeable_rank if portfolio_ranked else universe).to_numpy(),
+        "Universe rank": universe.to_numpy(),
+        "Portfolio rank": tradeable_rank.to_numpy(),
         "Exposure": decisions["exposure"].astype(str).to_numpy(),
         "Sub": sub,
         "Category": category.to_numpy(),
-        "Index": decisions.get("benchmark", pd.Series("", index=decisions.index)).map(_dash).to_numpy(),
+        "Price index": price_only.to_numpy(),
+        "Index": decisions.get("benchmark", pd.Series("", index=decisions.index)).map(index_name).to_numpy(),
         "Funds": n_funds.to_numpy(),
         "Level": ids.map(levels).astype(float).to_numpy() if len(levels) else np.nan,
-        "Rank Δ": rank_change(decisions).to_numpy(),
-        "Rebalance rank": _num(decisions["decision_rank"]).to_numpy(),
-        "Portfolio rank": portfolio_rank(decisions).to_numpy(),
+        "1M Δ": (was_1m - tradeable_rank).to_numpy(),
+        "3M Δ": (was_3m - tradeable_rank).to_numpy(),
+        "1M rank": was_1m.to_numpy(),
+        "3M rank": was_3m.to_numpy(),
         **{p: _num(decisions.get(f"{prefix}{p}")).to_numpy() for p in ("1M", "3M", "6M", "12M")},
+        "Max DD 3M": (ids.map(drawdown_3m).astype(float).to_numpy()
+                      if drawdown_3m is not None and len(drawdown_3m) else np.nan),
         "12M vs cash": (r12_abs - hurdle).to_numpy() if hurdle is not None else np.nan,
         "Score": _num(decisions["momentum_z"]).to_numpy(),
         "Portfolio": [
@@ -145,15 +215,14 @@ def display_frame(decisions: pd.DataFrame, levels: pd.Series, funds: pd.Series, 
                             _flag(decisions, "tradeable"))
         ],
         "Quadrant": decisions.get("stage", pd.Series("", index=decisions.index)).map(_dash).to_numpy(),
-        "Max DD": _num(decisions.get("max_drawdown")).to_numpy(),
     }, index=decisions.index)
     out["Portfolio"] = out["Portfolio"].replace({"NOT HELD": "Not held"})
     return out
 
 
 # Sort option → (table column key for the header arrow, ascending).
-SORT_KEYS = {"Rank": ("rank", True), "Rank Δ": ("dlt", False), "1M": ("r1", False), "3M": ("r3", False),
-             "6M": ("r6", False), "12M": ("r12", False), "Max DD": ("dd", False)}
+SORT_KEYS = {"Rank": ("rank", True), "1M Δ": ("d1m", False), "1M": ("r1", False), "3M": ("r3", False),
+             "6M": ("r6", False), "12M": ("r12", False), "Max DD 3M": ("dd3", False)}
 
 
 def sort_frame(view: pd.DataFrame, sort_by: str) -> pd.DataFrame:
@@ -164,8 +233,8 @@ def sort_frame(view: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 def movers(view: pd.DataFrame, n: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The exposures that climbed and fell most places since the last rebalance."""
-    moved = view.dropna(subset=["Rank Δ"])
-    risers = moved[moved["Rank Δ"] > 0].sort_values(["Rank Δ", "Portfolio rank"], ascending=[False, True])
-    fallers = moved[moved["Rank Δ"] < 0].sort_values(["Rank Δ", "Portfolio rank"], ascending=[True, True])
+    """The exposures that climbed and fell most places since the last rebalance (1M Δ)."""
+    moved = view.dropna(subset=["1M Δ"])
+    risers = moved[moved["1M Δ"] > 0].sort_values(["1M Δ", "Portfolio rank"], ascending=[False, True])
+    fallers = moved[moved["1M Δ"] < 0].sort_values(["1M Δ", "Portfolio rank"], ascending=[True, True])
     return risers.head(n), fallers.head(n)

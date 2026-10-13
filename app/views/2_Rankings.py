@@ -23,13 +23,18 @@ if str(ROOT) not in sys.path:
 from app.components import screener as scr  # noqa: E402
 from app.data import (  # noqa: E402
     current_regime,
+    load_backtest,
     load_decisions,
     load_index_panel,
     load_portfolio,
     strategy_config,
     vehicle_frame,
 )
-from app.kit.screener_table import exposure_href, render_screener_table, signed_pct  # noqa: E402
+from app.kit.screener_table import (  # noqa: E402
+    exposure_href,
+    render_screener_table,
+    signed_pct,
+)
 
 BASES = ("Absolute", "vs Nifty 50")
 _SORT_MIRROR = "_rank_sort_by_idx"
@@ -59,6 +64,12 @@ rebalance = pd.Timestamp(live.target.as_of) if live is not None else None
 as_of = panel.index.max() if not panel.empty else pd.Timestamp.today().normalize()
 levels = panel.ffill().iloc[-1] if not panel.empty else pd.Series(dtype=float)
 funds = scr.fund_counts(vehicle_frame(), as_of)
+# The month-end decision chain, for 1M Δ and 3M Δ: the same TargetPortfolio
+# objects the backtest and the live book are built from (cached across pages).
+backtest = load_backtest()
+chain = backtest.decisions if backtest is not None and backtest.ok else []
+ranks_1m, ranks_3m = scr.past_ranks(chain, 1), scr.past_ranks(chain, 3)
+drawdown_3m = scr.max_drawdown(panel)
 search_opts, by_name, by_index = scr.search_options(decisions)
 
 c_export = _head()
@@ -141,7 +152,9 @@ if st.session_state.pop("_scr_open_exposure", False):
     st.switch_page("views/4_Exposure.py")
 
 relative = basis == BASES[1]
-table = scr.display_frame(decisions, levels, funds, hurdle, relative=relative)
+table = scr.display_frame(decisions, levels, funds, hurdle, relative=relative, ranks_1m=ranks_1m,
+                          ranks_3m=ranks_3m, drawdown_3m=drawdown_3m,
+                          portfolio_ranked=preset in scr.PORTFOLIO_RANKED)
 rows = masks.get(preset, masks[scr.DEFAULT_PRESET])
 if selected_search in by_index:
     rows = rows & decisions["exposure_id"].astype(str).isin(by_index[selected_search])
@@ -151,7 +164,7 @@ view = scr.sort_frame(table[rows], sort_by)
 
 key, ascending = scr.SORT_KEYS[sort_by]
 render_screener_table(view, panel, sorted_by=key, ascending=ascending,
-                      group_labels={"Momentum": "Momentum · vs Nifty 50"} if relative else None)
+                      group_labels={w: f"{w} vs Nifty 50" for w in ("1M", "3M", "6M", "12M")} if relative else None)
 
 # Export every column the ranking carries, the on-screen ones first, so the
 # file can be audited against the score behind the rank.
@@ -181,7 +194,7 @@ def render_rank_changes(frame: pd.DataFrame) -> None:
         return html.escape(str(value))
 
     def row_html(i: int, row, extra: bool = False) -> str:
-        delta = int(row["Rank Δ"])
+        delta = int(row["1M Δ"])
         tone = "positive" if delta > 0 else ("negative" if delta < 0 else "flat")
         ret = signed_pct(None if pd.isna(row["1M"]) else float(row["1M"]))
         ret_tone = "negative" if ret.startswith("−") else ("flat" if ret == "—" else "positive")
