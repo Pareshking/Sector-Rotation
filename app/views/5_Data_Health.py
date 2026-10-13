@@ -1,5 +1,15 @@
+"""Data Health: the Paresh app's data-quality footer and Market breadth page (src/ui/views/breadth_view.py).
+
+Element by element: the page head, a strip of readings (breadth's "today"
+strip), the stock page's data-check chips for the run's alerts, a bar list of
+sources (Portfolio's sector mix), then cards holding kit tables: the launch-date
+audit, the liquid fund with its NAV on Lightweight Charts, and the lineage.
+The long tail stays in expanders, as the stock page keeps its data checks.
+"""
+
 from __future__ import annotations
 
+import html
 import sys
 from pathlib import Path
 
@@ -10,70 +20,63 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import CHART_CONFIG, nav_sparkline  # noqa: E402
+from app.components.fmt import DASH, day, pct  # noqa: E402
 from app.components.header import header_state  # noqa: E402
 from app.components.metrics import get_metadata, health_summary, lineage_frame, source_label  # noqa: E402
-from app.components.tables import show_table  # noqa: E402
-from app.components.theme import _esc, chip, html_block, kpi_grid, note, page_header, section  # noqa: E402
 from app.data import UNIVERSE_PATH, load_cash_nav, load_decisions, load_index_panel  # noqa: E402
+from app.kit import lw_chart as lw  # noqa: E402
+from app.kit import page_kit as kit  # noqa: E402
+from app.kit.theme import render_saas_table  # noqa: E402
 from src.portfolio.live import load_registry  # noqa: E402
 
-page_header(
-    "Trust & lineage",
-    "Data Health",
-    "Where every number came from and what is missing. An absent history is shown as absent, never quietly "
-    "replaced by a synthetic proxy.",
-)
+VALUE_TYPES = {"TRI": "TRI · total return", "CLOSE": "CLOSE · price index"}
 
 metadata = get_metadata()
+health = health_summary(metadata) if metadata else {}
+kit.page_head("Data health", f"Where every number came from · published {health.get('updated', DASH)}")
 if not metadata:
-    note("<b>Prepared metadata is unavailable.</b> Run the data pipeline first.", tone="neg")
+    kit.note("Prepared metadata is unavailable.", "Run the data pipeline first.")
     st.stop()
 
-health = health_summary(metadata)
 state = header_state()
 alerts = [a for a in (metadata.get("quality_alerts") or []) if a.get("severity") in {"error", "warning"}]
 errors = [a for a in alerts if a.get("severity") == "error"]
-benchmark_type = str(metadata.get("benchmark_value_type") or "—")
+benchmark_type = str(metadata.get("benchmark_value_type") or DASH)
 missing = len(health["skipped"]) + len(health["etf_skipped"])
 
-# --------------------------------------------------------------------------- #
-# Health status grid
-# --------------------------------------------------------------------------- #
-section("Status", f"Published {health['updated']}")
-kpi_grid(
-    [
-        ("Freshness", "Fresh" if state.fresh else "Stale",
-         f"{health['age'] or 'age unknown'} · limit {state.max_age_hours:.0f}h", "pos" if state.fresh else "warn"),
-        ("Decision-grade", f"{health['decision_grade']}/{health['total']}", "authoritative index histories",
-         "pos" if health["healthy"] else "warn"),
-        ("Benchmark", f"{metadata.get('benchmark', 'Nifty 50')} {benchmark_type}",
-         "total return confirmed" if benchmark_type == "TRI" else "not a total-return series",
-         "pos" if benchmark_type == "TRI" else "neg"),
-        ("Fund histories", f"{health['etf_valid']}/{health['etf_total']}", "ETF and index-fund prices", ""),
-        ("Missing values", str(missing), "index or fund histories absent", "warn" if missing else "pos"),
-        ("Execution alerts", str(len(alerts)), f"{len(errors)} error(s) vs the previous run",
-         "neg" if errors else ("warn" if alerts else "pos")),
-    ]
-)
-
-counts = {k: v for k, v in (metadata.get("source_counts") or {}).items() if v}
-if counts:
-    html_block(
-        '<div class="ds-legend"><span>Sources</span>'
-        + "".join(
-            chip(f"{source_label(k.removeprefix('etf:'))}{' · fund' if k.startswith('etf:') else ''} {v}", "info")
-            for k, v in counts.items()
-        )
-        + "</div>"
-    )
-for alert in alerts:
-    note(f"<b>{_esc(alert.get('check', 'check'))}</b> — {_esc(alert.get('message', ''))}",
-         tone="neg" if alert.get("severity") == "error" else "warn")
-if not alerts:
-    note("No data-quality regressions against the previous published run.", tone="pos")
 if health["proxy"]:
-    note(f"<b>{health['proxy']} proxy histories are present.</b> They are excluded from decisions.", tone="neg")
+    kit.note(f"{health['proxy']} proxy histories are present.", "They are excluded from decisions.")
+
+kit.readings([
+    kit.Reading("Freshness", "Fresh" if state.fresh else "Stale",
+                f"{health['age'] or 'age unknown'} · limit {state.max_age_hours:.0f}h", "up" if state.fresh else "warn"),
+    kit.Reading("Decision-grade", f"{health['decision_grade']}/{health['total']}", "authoritative index histories",
+                "up" if health["healthy"] else "warn"),
+    kit.Reading("Benchmark", f"{metadata.get('benchmark', 'Nifty 50')} {benchmark_type}",
+                "total return confirmed" if benchmark_type == "TRI" else "not a total-return series",
+                "up" if benchmark_type == "TRI" else "down"),
+    kit.Reading("Fund histories", f"{health['etf_valid']}/{health['etf_total']}", "ETF and index-fund prices"),
+    kit.Reading("Missing values", str(missing), "index or fund histories absent", "warn" if missing else "up"),
+    kit.Reading("Execution alerts", str(len(alerts)), f"{len(errors)} error(s) vs the previous run",
+                "down" if errors else ("warn" if alerts else "up")),
+], "Data health")
+
+checks = [(a.get("severity") == "error", f"{a.get('check', 'check')} — {a.get('message', '')}") for a in alerts]
+if not checks:
+    checks = [(False, "No data-quality regressions against the previous run")]
+counts = {k: v for k, v in (metadata.get("source_counts") or {}).items() if v}
+left, right = st.columns([1.4, 1], gap="medium")
+with left, kit.card("Checks", "dh_checks", "this run against the previous one"):
+    st.html('<div class="sp-checks">'
+            + "".join(f'<span class="{"bad" if bad else ""}">{html.escape(text)}</span>' for bad, text in checks)
+            + "</div>")
+with right, kit.card("Sources", "dh_sources", "histories retrieved per source"):
+    if counts:
+        rows = [(f"{source_label(k.removeprefix('etf:'))}{' · fund' if k.startswith('etf:') else ''}",
+                 float(v), str(v), False) for k, v in counts.items()]
+        st.html(kit.bar_list(rows, scale=max(r[1] for r in rows)))
+    else:
+        kit.caption("No source counts in this run's metadata.")
 
 # --------------------------------------------------------------------------- #
 # Launch dates and back-calculated history
@@ -81,124 +84,103 @@ if health["proxy"]:
 panel, _ = load_index_panel()
 decisions = load_decisions()
 names = decisions.set_index("exposure_id")["exposure"].to_dict() if not decisions.empty else {}
-section("Launch dates & backfill audit", "NSE computes an index back to its base date when it launches it")
-if panel.empty:
-    note("The index price panel has not been written yet.", tone="warn")
-else:
-    start = panel.index.min()
-    rows = []
-    for exposure in load_registry(UNIVERSE_PATH).all():
-        if exposure.id not in panel.columns:
-            continue
-        observed = panel[exposure.id].dropna().index
-        launch = pd.Timestamp(exposure.launch_date) if exposure.launch_date else None
-        first_fund = pd.Timestamp(exposure.investable_from) if exposure.investable_from else None
-        rows.append(
-            {
+with kit.card("Launch dates & backfill", "dh_launch", "NSE computes an index back to its base date when it launches it"):
+    if panel.empty:
+        kit.caption("The index price panel has not been written yet.")
+    else:
+        start = panel.index.min()
+        rows = []
+        for exposure in load_registry(UNIVERSE_PATH).all():
+            if exposure.id not in panel.columns:
+                continue
+            observed = panel[exposure.id].dropna().index
+            launch = pd.Timestamp(exposure.launch_date) if exposure.launch_date else None
+            first_fund = pd.Timestamp(exposure.investable_from) if exposure.investable_from else None
+            rows.append({
                 "Exposure": names.get(exposure.id, exposure.name),
                 "Base date": pd.Timestamp(exposure.base_date) if exposure.base_date else None,
                 "NSE launch": launch,
                 "Launch basis": ("Upper bound" if exposure.launch_date_is_upper_bound
                                  else ("Factsheet" if launch is not None else "Unknown")),
                 "First fund": first_fund,
-                "Back-calculated in panel": float((observed < launch).mean()) if launch is not None and len(observed) else 0.0,
-                "Investable in panel": float((observed >= first_fund).mean()) if first_fund is not None and len(observed) else 0.0,
-            }
-        )
-    audit = pd.DataFrame(rows).sort_values(["Back-calculated in panel", "Exposure"], ascending=[False, True])
-    inside = audit[audit["Back-calculated in panel"] > 0]
-    synthetic = float(audit["Back-calculated in panel"].mean()) if not audit.empty else 0.0
-    kpi_grid(
-        [
-            ("Launched inside the panel", f"{len(inside)} of {len(audit)}",
-             f"their history before launch, from {start:%b %Y}, is synthetic", "warn" if len(inside) else "pos"),
-            ("Synthetic share of the panel", f"{synthetic:.0%}", "averaged across indices", ""),
-            ("Upper-bound launch dates", str(int((audit["Launch basis"] == "Upper bound").sum())),
-             "factsheet leaves Launch Date blank", ""),
-            ("No fund yet", str(int(audit["First fund"].isna().sum())), "signal only, nothing to buy", ""),
-        ]
-    )
-    show_table(
-        audit,
-        hide_index=True,
-        width="stretch",
-        height=min(40 + 35 * len(audit), 560),
-        column_config={
-            "Exposure": st.column_config.TextColumn(pinned=True),
-            "Base date": st.column_config.DateColumn(format="DD MMM YYYY"),
-            "NSE launch": st.column_config.DateColumn(format="DD MMM YYYY", help="From the NSE Indices factsheet"),
-            "Launch basis": st.column_config.TextColumn(
-                help="Upper bound: NSE publishes no launch date, so this is the latest day the index is documented live"),
-            "First fund": st.column_config.DateColumn(format="DD MMM YYYY",
-                                                      help="Earliest authoritative inception among its vehicles"),
-            "Back-calculated in panel": st.column_config.ProgressColumn(
-                format="percent", min_value=0.0, max_value=1.0, help="Share of this index's stored history before its launch"),
-            "Investable in panel": st.column_config.ProgressColumn(
-                format="percent", min_value=0.0, max_value=1.0, help="Share of its stored history on which a fund existed"),
-        },
-    )
-    note("Launch and base dates come from each index's NSE Indices factsheet, recorded in <code>universe.json</code>; "
-         "fund dates are each vehicle's first published NAV in AMFI's record. The Evidence page shows the strategy "
-         "with and without everything before each launch date.")
+                "Back-calculated": float((observed < launch).mean()) if launch is not None and len(observed) else 0.0,
+                "Investable": float((observed >= first_fund).mean()) if first_fund is not None and len(observed) else 0.0,
+            })
+        audit = pd.DataFrame(rows).sort_values(["Back-calculated", "Exposure"], ascending=[False, True])
+        inside = audit[audit["Back-calculated"] > 0]
+        synthetic = float(audit["Back-calculated"].mean()) if not audit.empty else 0.0
+        kit.metric_row([
+            kit.Metric("Launched inside the panel", f"{len(inside)} of {len(audit)}",
+                       help=f"Their history before launch, from {start:%b %Y}, is synthetic"),
+            kit.Metric("Synthetic share", f"{synthetic:.0%}", help="Of the panel, averaged across indices"),
+            kit.Metric("Upper-bound launch dates", str(int((audit["Launch basis"] == "Upper bound").sum())),
+                       help="The factsheet leaves Launch Date blank"),
+            kit.Metric("No fund yet", str(int(audit["First fund"].isna().sum())), help="Signal only, nothing to buy"),
+        ], key="dh_launch")
+        render_saas_table(audit.assign(**{
+            "Base date": audit["Base date"].map(day),
+            "NSE launch": audit["NSE launch"].map(day),
+            "First fund": audit["First fund"].map(day),
+            "Back-calculated": audit["Back-calculated"].map(lambda v: pct(v, 0)),
+            "Investable": audit["Investable"].map(lambda v: pct(v, 0)),
+        }), max_height=480)
+        kit.caption("Back-calculated and Investable: share of each index's stored history before its launch, and with "
+                    "a fund available. Dates from NSE factsheets (universe.json) and AMFI's first NAV.")
 
 # --------------------------------------------------------------------------- #
 # Liquid fund: the cash return and the hurdle
 # --------------------------------------------------------------------------- #
-section("Liquid fund status", "Its NAV is the cash hurdle and the return on unallocated cash")
 proxy = metadata.get("cash_proxy") or {}
 cash = load_cash_nav()
-if cash is not None and not cash.empty:
-    last_nav = cash.index.max()
-    lag = (panel.index.max() - last_nav).days if not panel.empty else 0
-    year_ago = cash.loc[: last_nav - pd.Timedelta(days=365)]
-    trailing = float(cash.iloc[-1] / year_ago.iloc[-1] - 1.0) if not year_ago.empty else float("nan")
-    kpi_grid(
-        [
-            ("Latest NAV", f"₹{cash.iloc[-1]:,.2f}", f"{last_nav:%d %b %Y}", ""),
-            ("Trailing 12M", f"{trailing:.2%}" if trailing == trailing else "—", "the hurdle every holding must beat", "info"),
-            ("Lag to index data", f"{max(lag, 0)} days", "NAV date vs last index session", "pos" if lag <= 3 else "warn"),
-            ("History", f"{len(cash):,} NAVs", f"since {cash.index.min():%b %Y}", ""),
-        ]
-    )
-    st.plotly_chart(nav_sparkline(cash.loc[last_nav - pd.Timedelta(days=400):]), width="stretch", config=CHART_CONFIG)
-    st.caption(f"{_esc(proxy.get('name') or 'Configured liquid fund')} · AMFI scheme {proxy.get('scheme_code', '—')} · "
-               f"ingest mode {proxy.get('mode', '—')}")
-else:
-    note("The liquid fund's NAV (<code>cash_nav.parquet</code>) has not been published. Until it is, the hurdle and "
-         "cash accrual use the configured constant rate.", tone="warn")
+with kit.card("Liquid fund", "dh_cash", "its NAV is the cash hurdle and the return on unallocated cash"):
+    if cash is not None and not cash.empty:
+        last_nav = cash.index.max()
+        lag = (panel.index.max() - last_nav).days if not panel.empty else 0
+        year_ago = cash.loc[: last_nav - pd.Timedelta(days=365)]
+        trailing = float(cash.iloc[-1] / year_ago.iloc[-1] - 1.0) if not year_ago.empty else float("nan")
+        kit.metric_row([
+            kit.Metric("Latest NAV", f"₹{cash.iloc[-1]:,.2f}", help=f"{last_nav:%d %b %Y}"),
+            kit.Metric("Trailing 12M", pct(trailing, 2), help="The hurdle every holding must beat"),
+            kit.Metric("Lag to index data", f"{max(lag, 0)} days", help="NAV date against the last index session"),
+            kit.Metric("History", f"{len(cash):,} NAVs", help=f"Since {cash.index.min():%b %Y}"),
+        ], key="dh_cash")
+        recent = cash.loc[last_nav - pd.Timedelta(days=400):]
+        lw.render([{"height": 220, "series": [{"name": "NAV", "type": "area", "color": lw.INDIGO, "fmt": "num",
+                                               "data": lw.series_points(recent.index, recent)}]}], key="dh_cash_nav")
+        kit.caption(f"{proxy.get('name') or 'Configured liquid fund'} · AMFI scheme {proxy.get('scheme_code') or DASH} · "
+                    f"ingest {proxy.get('mode') or DASH}")
+    else:
+        kit.callout("The liquid fund's NAV has not been published.",
+                    "Until it is, the hurdle and cash accrual use the configured constant rate.", "warn")
 
 # --------------------------------------------------------------------------- #
 # Lineage and the long tail
 # --------------------------------------------------------------------------- #
-section("Data lineage", "One row per canonical exposure")
 lineage = lineage_frame(metadata)
-if lineage.empty:
-    note("No lineage records are available.")
-else:
-    value_types = metadata.get("value_type_by_canonical_exposure", {}) or {}
-    display = pd.DataFrame(
-        {
+with kit.card("Data lineage", "dh_lineage", "one row per exposure"):
+    if lineage.empty:
+        kit.caption("No lineage records are available.")
+    else:
+        value_types = metadata.get("value_type_by_canonical_exposure", {}) or {}
+        render_saas_table(pd.DataFrame({
             "Exposure": lineage["exposure"].map(lambda e: names.get(e, e)),
             "Retrieved via": lineage["source"],
-            "Value": lineage["exposure"].map(lambda e: value_types.get(e, "—")),
+            "Value": lineage["exposure"].map(lambda e: VALUE_TYPES.get(value_types.get(e), value_types.get(e) or DASH)),
             "Resolved index": lineage["resolved_name"],
-        }
-    )
-    show_table(display, hide_index=True, width="stretch", height=min(40 + 35 * len(display), 480),
-                 column_config={"Exposure": st.column_config.TextColumn(pinned=True),
-                                "Value": st.column_config.TextColumn(help="TRI = total return; CLOSE = price index")})
+        }), max_height=480)
 
 with st.expander(f"Fund coverage · {health['etf_valid']}/{health['etf_total']}", expanded=False):
     if health["etf_skipped"]:
         st.write("No usable price history: " + ", ".join(health["etf_skipped"]))
-        st.caption("An ingestion gap in the implementation layer, not a signal. The index histories behind every "
-                   "decision are unaffected.")
+        kit.caption("A gap in the implementation layer, not a signal: the index histories are unaffected.")
     else:
         st.write("Every mapped fund has a price history.")
 with st.expander(f"Validation warnings · {len(health['warnings'])}", expanded=False):
-    for warning in health["warnings"] or ["None."]:
-        st.write(f"• {warning}")
+    if health["warnings"]:
+        for warning in health["warnings"]:
+            st.write(f"• {warning}")
+    else:
+        st.write("No validation warnings.")
 with st.expander(f"Missing Yahoo symbols · {len(health['missing_yfinance'])}", expanded=False):
-    st.caption("Yahoo is never used for an index history, so this affects no signal; it only means no secondary "
-               "cross-check series exists.")
-    st.write(", ".join(sorted(names.get(e, e) for e in health["missing_yfinance"])) or "None.")
+    kit.caption("Yahoo is never used for an index history: this only means no secondary cross-check exists.")
+    st.write(", ".join(sorted(names.get(e, e) for e in health["missing_yfinance"])) or "Every exposure has one.")

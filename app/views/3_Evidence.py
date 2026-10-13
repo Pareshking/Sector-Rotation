@@ -1,8 +1,21 @@
+"""Evidence: the Paresh app's Backtest page (src/ui/views/backtest_view.py), on the walk-forward replay.
+
+Element by element: the page head with its toggle on the right, the one-line
+"Tested" summary, a strip of six readings, Growth of ₹100 with the drawdown
+under it (Lightweight Charts), Calendar returns (year by year, then each
+year's months), and a segmented control for the detail views. What Paresh has
+no counterpart for (with and without back-calculated history, every 12-month
+window, early versus recent, the parameter sensitivity) is drawn in the same
+cards. Every figure comes from app/data.py and src/quantitative; this page
+only lays them out.
+"""
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -10,15 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.components.charts import (  # noqa: E402
-    CHART_CONFIG,
-    equity_curve,
-    excess_distribution,
-    monthly_excess,
-    rolling_excess,
-)
-from app.components.tables import show_table, tinted  # noqa: E402
-from app.components.theme import fmt_pct, kpi_grid, note, page_header, section, tone_of  # noqa: E402
+from app.components.fmt import num, pct, tone  # noqa: E402
 from app.data import (  # noqa: E402
     EVALUATION_OPTIONS,
     EVALUATION_SETTINGS,
@@ -31,20 +36,21 @@ from app.data import (  # noqa: E402
     load_sensitivity,
     strategy_config,
 )
+from app.kit import lw_chart as lw  # noqa: E402
+from app.kit import page_kit as kit  # noqa: E402
+from app.kit.calendar import build_grid, render_calendar_returns, render_yearly_summary  # noqa: E402
+from app.kit.charts import render_columns  # noqa: E402
+from app.kit.theme import render_saas_table  # noqa: E402
 from src.quantitative.backtest import period_split, rolling_summary_stats, rolling_windows  # noqa: E402
 from src.quantitative.stats import deflated_sharpe  # noqa: E402
 
-page_header(
-    "Walk-forward evidence",
-    "Evidence",
-    "The live rules replayed over every completed month, net of costs, with cash earning what the liquid fund "
-    "earned. Point-in-time, not out-of-sample: the rules were specified after studying this window.",
-)
+BENCH = "Nifty 50 TRI"
+
+actions = kit.page_head("Evidence", "The live rules replayed month by month, net of costs", actions=True)
 
 panel, benchmark = load_index_panel()
 if panel.empty or benchmark.empty:
-    note("<b>No index price panel is available yet.</b> The data pipeline writes "
-         "<code>data/processed/index_prices.parquet</code> on its next run.", tone="warn")
+    kit.note("No index price panel yet.", "The data pipeline writes it on its next run.")
     st.stop()
 
 live_config = strategy_config()
@@ -68,176 +74,239 @@ def _pretty_reasons(text: str) -> str:
     return "; ".join(parts)
 
 
-def _named(frame: pd.DataFrame) -> pd.DataFrame:
-    out = frame.copy()
-    out["holdings"] = out["holdings"].map(_pretty)
-    if "skipped" in out.columns:
-        out["skipped"] = out["skipped"].map(_pretty_reasons)
-    return out
-
-
 def _deflated(result):
     """Deflated Sharpe of monthly returns over what cash earned the same month."""
     monthly = result.monthly
     return deflated_sharpe(monthly["strategy_return"] - monthly["cash_return"], STRATEGY_TRIALS)
 
 
+def _growth(equity: pd.DataFrame, key: str) -> None:
+    """Growth of ₹100 against Nifty 50 TRI, both drawdowns in the pane under it."""
+    strat, bench = equity["strategy"].astype(float), equity["benchmark"].astype(float)
+    lw.render([
+        {"height": 300, "series": [
+            {"name": "Strategy (net)", "type": "line", "color": lw.INDIGO, "fmt": "num",
+             "data": lw.series_points(equity.index, strat)},
+            {"name": BENCH, "type": "line", "color": lw.GREY, "fmt": "num",
+             "data": lw.series_points(equity.index, bench)}]},
+        {"height": 150, "series": [
+            {"name": "Strategy drawdown", "type": "baseline", "color": lw.RED, "negColor": lw.RED, "fmt": "pct",
+             "data": lw.series_points(equity.index, strat / strat.cummax() - 1.0, scale=100.0)},
+            {"name": f"{BENCH} drawdown", "type": "line", "color": lw.GREY, "fmt": "pct", "width": 1,
+             "data": lw.series_points(equity.index, bench / bench.cummax() - 1.0, scale=100.0)}]},
+    ], key=key)
+
+
+def _bars(dates, values, key: str, height: int = 240) -> None:
+    """Signed returns as green and red bars on real dates."""
+    points = lw.series_points(dates, pd.to_numeric(pd.Series(list(values)), errors="coerce"), scale=100.0)
+    lw.render([{"height": height, "series": [
+        {"name": "Excess", "type": "histogram", "color": lw.GREEN, "fmt": "pct",
+         "colors": [lw.GREEN if v >= 0 else lw.RED for _, v in points], "data": points}]}], key=key)
+
+
 # --------------------------------------------------------------------------- #
-# Tearsheet: the live rules, net of costs
+# The live rules, net of costs
 # --------------------------------------------------------------------------- #
-include_backfill = st.toggle(
-    "Include back-calculated index history",
-    value=live_config.backfill_policy == "include",
-    key="ev_backfill",
-    help="Before its NSE launch date an index's values were computed after the fact and could not have been "
-    "traded. Off: an index is not eligible before its launch.",
-)
+with actions:
+    include_backfill = st.toggle(
+        "Include back-calculated index history",
+        value=live_config.backfill_policy == "include",
+        key="ev_backfill",
+        help="Before its NSE launch an index's values were computed after the fact and could not have been traded.",
+    )
 result = load_backtest(backtest_config(exclude_backcalculated=not include_backfill))
 if not result.ok:
-    note(f"<b>Evidence unavailable.</b> {result.error}", tone="warn")
+    kit.note("Evidence unavailable.", str(result.error))
     st.stop()
 stats = result.stats
 dsr = _deflated(result)
-first, last = pd.to_datetime(result.monthly["period_end"]).agg(["min", "max"])
+stamps = pd.to_datetime(result.equity.index)  # first fill to last mark
+first, last = stamps.min(), stamps.max()
+months = int(stats["months"])
 
-section("Tearsheet", f"Net of {stats['cost_bps_per_side']:g} bps per side · {int(stats['months'])} months · "
-        f"{first:%b %Y} – {last:%b %Y}")
-kpi_grid(
-    [
-        ("Net CAGR", fmt_pct(stats["cagr"]), f"Nifty 50 TRI {fmt_pct(stats['benchmark_cagr'])}",
-         "pos" if stats["cagr"] > stats["benchmark_cagr"] else "neg"),
-        ("Net total return", fmt_pct(stats["total_return"]), f"Nifty 50 TRI {fmt_pct(stats['benchmark_total_return'])}", ""),
-        ("Net excess vs Nifty", fmt_pct(stats["excess_total"]), f"over {int(stats['months'])} months",
-         tone_of(stats["excess_total"])),
-        ("Max drawdown", fmt_pct(stats["max_drawdown"]), f"Nifty 50 TRI {fmt_pct(stats['benchmark_max_drawdown'])}", "neg"),
-        ("Deflated Sharpe", f"{dsr.deflated:.0%}" if dsr else "—",
-         f"P(true Sharpe > 0) after {STRATEGY_TRIALS} trials" if dsr else "too few periods",
-         "pos" if dsr and dsr.deflated >= 0.95 else "warn"),
-    ]
+st.html(
+    '<div class="bt-sum"><b>Tested</b>'
+    f"<span>{first:%d %b %Y} to {last:%d %b %Y}</span>"
+    f"<span><b>{months}</b> months</span>"
+    f"<span>Hold top <b>{live_config.target_holdings_n}</b></span>"
+    f"<span>Keep while rank ≤ <b>{live_config.retention_buffer_m}</b></span>"
+    "<span>Hurdle <b>liquid fund 12M</b></span>"
+    "<span>Fill <b>next close</b></span>"
+    f"<span>Costs <b>{stats['cost_bps_per_side']:g} bps</b> per side</span>"
+    f"<span>Back-calculated history <b>{'included' if include_backfill else 'excluded'}</b></span></div>"
 )
-kpi_grid(
-    [
-        ("Sharpe", f"{stats['sharpe']:.2f}", f"rf {stats['risk_free']:.1%} · Nifty {stats['benchmark_sharpe']:.2f}", ""),
-        ("Avg turnover", fmt_pct(stats["avg_turnover"]), "of the book each rebalance", ""),
-        ("Costs paid", fmt_pct(stats["total_cost"]), f"gross total {fmt_pct(stats['gross_total_return'])}", ""),
-        ("Periods with cash", f"{int(stats['cash_months'])} of {int(stats['periods'])}", "a slot failed the hurdle", ""),
-    ]
-)
-if dsr:
-    note(
-        f"<b>Deflated Sharpe {dsr.deflated:.0%}</b> (probabilistic Sharpe before deflation {dsr.probabilistic:.0%}): "
-        f"the probability that the true monthly Sharpe is above zero after allowing for the best of "
-        f"{STRATEGY_TRIALS} zero-edge configurations, which is every strategy setting this page lets anyone try "
-        f"({' × '.join(f'{len(v)} {k.lower()}' for k, v in STRATEGY_OPTIONS.items())}). Luck alone would produce "
-        f"a monthly Sharpe of {dsr.benchmark_sharpe:.2f}, against {dsr.sharpe:.2f} here, over {dsr.observations} "
-        "monthly returns over cash. Below 95% is not evidence of an edge (Bailey &amp; López de Prado 2014).",
-        tone="" if dsr.deflated >= 0.95 else "warn",
-    )
 
-section("Growth of ₹100", "Net strategy against Nifty 50 TRI, with both drawdowns beneath")
-st.plotly_chart(equity_curve(result.equity), width="stretch", config=CHART_CONFIG)
+kit.note(
+    "Point-in-time, not out-of-sample.",
+    "The rules were specified after studying this window."
+    + ("" if dsr and dsr.deflated >= 0.95 else " A Deflated Sharpe below 95% is not evidence of an edge."),
+)
+
+kit.readings([
+    kit.Reading("Net CAGR", pct(stats["cagr"], signed=True), f"{BENCH} {pct(stats['benchmark_cagr'], signed=True)}",
+                "up" if stats["cagr"] > stats["benchmark_cagr"] else "down"),
+    kit.Reading("Net total return", pct(stats["total_return"], signed=True),
+                f"{BENCH} {pct(stats['benchmark_total_return'], signed=True)}", tone(stats["total_return"])),
+    kit.Reading("Net excess vs Nifty", pct(stats["excess_total"], signed=True), f"over {months} months",
+                tone(stats["excess_total"])),
+    kit.Reading("Max drawdown", pct(stats["max_drawdown"]), f"{BENCH} {pct(stats['benchmark_max_drawdown'])}", "down"),
+    kit.Reading("Deflated Sharpe", f"{dsr.deflated:.0%}" if dsr else "—",
+                f"after {STRATEGY_TRIALS} trials" if dsr else "too few periods",
+                "up" if dsr and dsr.deflated >= 0.95 else "warn"),
+    kit.Reading("Sharpe", num(stats["sharpe"]), f"{BENCH} {num(stats['benchmark_sharpe'])} · rf {pct(stats['risk_free'])}"),
+], "Walk-forward evidence")
+
+with kit.card("Growth of ₹100", "ev_growth", f"net of costs · {BENCH} in grey"):
+    kit.metric_row([
+        kit.Metric("Avg turnover", pct(stats["avg_turnover"]), help="Of the book, each rebalance"),
+        kit.Metric("Costs paid", pct(stats["total_cost"])),
+        kit.Metric("Gross total", pct(stats["gross_total_return"], signed=True)),
+        kit.Metric("Periods with cash", f"{int(stats['cash_months'])} of {int(stats['periods'])}",
+                   help="A slot failed the hurdle"),
+    ], key="ev_growth")
+    _growth(result.equity, "ev_equity")
+
+ledger = result.monthly
+with kit.card("Calendar returns", "ev_calendar", f"Strategy, {BENCH} and Alpha · month of each fill"):
+    calendar = pd.DataFrame({
+        "Period": pd.to_datetime(ledger["fill_date"]).dt.to_period("M").astype(str),
+        "Strategy": ledger["strategy_return"].astype(float),
+        "Benchmark": ledger["benchmark_return"].astype(float),
+    })
+    grid = build_grid(calendar.assign(Alpha=calendar["Strategy"] - calendar["Benchmark"]),
+                      {"Strategy": "Strategy", "Benchmark": BENCH, "Alpha": "Alpha"})
+    render_yearly_summary(grid, BENCH)
+    render_calendar_returns(grid)
 
 # --------------------------------------------------------------------------- #
 # Pre-launch history: the same rules, with and without it
 # --------------------------------------------------------------------------- #
 other = load_backtest(backtest_config(exclude_backcalculated=include_backfill))
 if other.ok:
-    pair = {("Included" if include_backfill else "Excluded"): result,
-            ("Excluded" if include_backfill else "Included"): other}
-    comparison = pd.DataFrame(
-        [
-            {
-                "Back-calculated history": label,
-                "Net total return": r.stats["total_return"],
-                "Net CAGR": r.stats["cagr"],
-                "Net excess vs Nifty": r.stats["excess_total"],
-                "Max drawdown": r.stats["max_drawdown"],
-                "Deflated Sharpe": (d.deflated if (d := _deflated(r)) else None),
-            }
-            for label, r in sorted(pair.items())
-        ]
-    )
-    section("With and without back-calculated history", "Same rules; only pre-launch eligibility differs")
-    show_table(
-        tinted(comparison, ["Net excess vs Nifty"], cap=0.4),
-        hide_index=True,
-        width="stretch",
-        column_config={
-            c: st.column_config.NumberColumn(format="percent") for c in comparison.columns if c != "Back-calculated history"
-        },
-    )
+    pair = {include_backfill: result, (not include_backfill): other}
+    comparison = pd.DataFrame([
+        {
+            "Strategy": "With back-calculated history" if included else "Without back-calculated history",
+            "Total Return": r.stats["total_return"],
+            "CAGR": r.stats["cagr"],
+            "Alpha": r.stats["excess_total"],
+            "Max Drawdown": r.stats["max_drawdown"],
+            "Deflated Sharpe": f"{d.deflated:.0%}" if (d := _deflated(r)) else "—",
+        }
+        for included, r in sorted(pair.items(), reverse=True)
+    ])
+    with kit.card("With and without back-calculated history", "ev_backfill_pair",
+                  "same rules · only pre-launch eligibility differs · Alpha = net excess vs Nifty"):
+        render_saas_table(comparison)
 
 # --------------------------------------------------------------------------- #
 # Robustness: every 12-month window, and early versus recent
 # --------------------------------------------------------------------------- #
-section("Every 12-month window", "A single number depends on when the test started; this does not")
 windows = rolling_windows(result, window=max(12 // live_config.rebalance_months, 2))
 roll = rolling_summary_stats(windows)
-if roll:
-    kpi_grid(
-        [
-            ("Beat Nifty 50", f"{roll['beat_rate']:.0%}", f"of {int(roll['windows'])} rolling windows",
-             "pos" if roll["beat_rate"] >= 0.5 else "neg"),
-            ("Median excess", fmt_pct(roll["median_excess"]), "the typical window", tone_of(roll["median_excess"])),
-            ("Worst window", fmt_pct(roll["worst_excess"]), "largest shortfall", "neg"),
-            ("Best window", fmt_pct(roll["best_excess"]), "largest lead", "pos"),
-        ]
-    )
-    left, right = st.columns(2, gap="medium")
-    with left:
-        st.plotly_chart(excess_distribution(windows), width="stretch", config=CHART_CONFIG)
-    with right:
-        st.plotly_chart(rolling_excess(windows), width="stretch", config=CHART_CONFIG)
-else:
-    note("Not enough completed periods yet to form a rolling window.")
+with kit.card("Every 12-month window", "ev_rolling", f"excess over {BENCH}"):
+    if not roll:
+        kit.caption("Not enough completed periods yet to form a rolling window.")
+    else:
+        kit.metric_row([
+            kit.Metric("Beat Nifty 50", f"{roll['beat_rate']:.0%}", help=f"Of {int(roll['windows'])} rolling windows"),
+            kit.Metric("Median excess", pct(roll["median_excess"], signed=True)),
+            kit.Metric("Worst window", pct(roll["worst_excess"], signed=True)),
+            kit.Metric("Best window", pct(roll["best_excess"], signed=True)),
+        ], key="ev_rolling")
+        left, right = st.columns(2, gap="medium")
+        with left:
+            excess = windows["excess"].astype(float)
+            edges = np.linspace(min(excess.min(), 0.0), max(excess.max(), 0.0), 21)
+            counts, edges = np.histogram(excess, bins=edges)
+            mids = (edges[:-1] + edges[1:]) / 2
+            width = float(edges[1] - edges[0]) or 1.0
+            median = float(excess.median())
+            render_columns(
+                [f"{a:+.0%} to {b:+.0%}" for a, b in zip(edges[:-1], edges[1:])],
+                counts.tolist(),
+                [lw.GREEN if m > 0 else lw.RED for m in mids],
+                unit="windows",
+                lines=[((0.0 - edges[0]) / width - 0.5, lw.GREY, ""),
+                       ((median - edges[0]) / width - 0.5, lw.INDIGO, f"median {median:+.1%}")],
+                x_title="How often",
+            )
+        with right:
+            _bars(windows["end"], windows["excess"], "ev_rolling_bars", height=260)
+            kit.caption("Each bar: the 12 months ending that date.")
 
-section("Early versus recent", "The blended figure hides which half it came from")
 split = period_split(result)
 if not split.empty:
-    halves = split.assign(
-        Half=split["half"].map({"early": "Early", "recent": "Recent"}),
-        Period=[f"{a:%b %Y} – {b:%b %Y}" for a, b in zip(split["from"], split["to"])],
-    )[["Half", "Period", "periods", "strategy", "benchmark", "excess", "cash_periods"]].rename(
-        columns={"periods": "Periods", "strategy": "Strategy (net)", "benchmark": "Nifty 50 TRI",
-                 "excess": "Excess", "cash_periods": "Periods with cash"}
-    )
-    show_table(
-        tinted(halves, ["Excess"], cap=0.3),
-        hide_index=True,
-        width="stretch",
-        column_config={c: st.column_config.NumberColumn(format="percent")
-                       for c in ("Strategy (net)", "Nifty 50 TRI", "Excess", "Periods with cash")},
-    )
+    halves = pd.DataFrame({
+        "Period": [f"{'Early' if h == 'early' else 'Recent'} · {a:%b %Y} – {b:%b %Y}"
+                   for h, a, b in zip(split["half"], split["from"], split["to"])],
+        "Rebalances": split["periods"].astype(int),
+        "Strategy Net": split["strategy"].astype(float),
+        "Benchmark": split["benchmark"].astype(float),
+        "Alpha": split["excess"].astype(float),
+        "Periods with cash": split["cash_periods"].map(pct),
+    })
+    with kit.card("Early versus recent", "ev_halves", "the blended figure hides which half it came from"):
+        render_saas_table(halves)
 
-with st.expander("Month-by-month record", expanded=False):
-    ledger = _named(result.monthly)
-    st.plotly_chart(monthly_excess(ledger), width="stretch", config=CHART_CONFIG)
-    ledger["Month"] = pd.to_datetime(ledger["period_end"]).dt.strftime("%b %Y")
-    show_table(
-        ledger[["Month", "holdings", "cash_slots", "turnover", "cost", "strategy_return", "benchmark_return",
-                "excess_return", "universe", "skipped"]].rename(
-            columns={"holdings": "Held", "cash_slots": "Cash", "turnover": "Turnover", "cost": "Cost",
-                     "strategy_return": "Strategy (net)", "benchmark_return": "Nifty 50 TRI",
-                     "excess_return": "Excess", "universe": "Eligible", "skipped": "Passed over"}),
-        hide_index=True,
-        width="stretch",
-        height=min(40 + 35 * len(ledger), 520),
-        column_config={c: st.column_config.NumberColumn(format="percent")
-                       for c in ("Turnover", "Cost", "Strategy (net)", "Nifty 50 TRI", "Excess")},
-    )
-    st.download_button("Download the monthly ledger (CSV)", ledger.to_csv(index=False).encode("utf-8"),
-                       file_name="sector_rotation_evidence.csv", mime="text/csv")
+# --------------------------------------------------------------------------- #
+# Detail views, as on the Paresh Backtest page
+# --------------------------------------------------------------------------- #
+VIEWS = ["Month by month", "Method"]
+view = st.segmented_control("Evidence detail", VIEWS, default=VIEWS[0], key="ev_view",
+                            label_visibility="collapsed") or VIEWS[0]
+
+if view == "Month by month":
+    named = ledger.assign(holdings=ledger["holdings"].map(_pretty))
+    if "skipped" in named.columns:
+        named["skipped"] = named["skipped"].map(_pretty_reasons)
+    named["Month"] = pd.to_datetime(named["period_end"]).dt.strftime("%b %Y")
+    with kit.card("Month by month", "ev_ledger", f"{len(named)} periods · excess over {BENCH}"):
+        _bars(named["period_end"], named["excess_return"], "ev_monthly_bars", height=220)
+        table = pd.DataFrame({
+            "Month": named["Month"],
+            "Held names": named["holdings"],
+            "Cash": pd.to_numeric(named["cash_slots"], errors="coerce").astype("Int64"),
+            "Turnover %": named["turnover"].astype(float) * 100.0,
+            "Cost": named["cost"].map(lambda v: pct(v, 2)),
+            "Strategy Net": named["strategy_return"].astype(float),
+            "Benchmark": named["benchmark_return"].astype(float),
+            "Alpha": named["excess_return"].astype(float),
+            "Eligible": pd.to_numeric(named["universe"], errors="coerce").astype("Int64"),
+            "Passed over (reason)": named["skipped"] if "skipped" in named.columns else "",
+        }).iloc[::-1]
+        render_saas_table(table, max_height=520)
+        export = named[["Month", "holdings", "cash_slots", "turnover", "cost", "strategy_return", "benchmark_return",
+                        "excess_return", "universe", "skipped"]]
+        st.download_button("Export months CSV", export.to_csv(index=False).encode("utf-8"),
+                           file_name="sector_rotation_evidence.csv", mime="text/csv", key="dl_ev_ledger")
+else:
+    with kit.card("Method", "ev_method", "how every figure on this page is made"):
+        st.markdown(
+            "**Point-in-time.** At every month-end close the same `construct_target_portfolio` that builds the "
+            "Portfolio page decides the holdings from prices up to that close.\n\n"
+            f"**Fills and costs.** Trades fill at the next session's close and pay "
+            f"**{live_config.cost_bps_per_side:g} bps** per side on the weight traded.\n\n"
+            f"**Cash.** Earns what the liquid fund's NAV earned between fills "
+            f"({live_config.risk_free_rate_annual:.1%} before its history). Only completed months count.\n\n"
+            + (f"**Deflated Sharpe {dsr.deflated:.0%}** (probabilistic Sharpe {dsr.probabilistic:.0%}): the chance "
+               f"the true monthly Sharpe is above zero after the best of {STRATEGY_TRIALS} zero-edge configurations "
+               f"({' × '.join(f'{len(v)} {k.lower()}' for k, v in STRATEGY_OPTIONS.items())}). Luck alone gives "
+               f"{dsr.benchmark_sharpe:.2f} against {dsr.sharpe:.2f} here, over {dsr.observations} monthly returns "
+               "over cash (Bailey & López de Prado 2014).\n\n" if dsr else "")
+            + "**Not modelled.** Tax, an ETF's premium to NAV, impact on thin funds, a fund's tracking difference, "
+            "and funds that launched and later closed. The universe was chosen in 2026."
+        )
 
 # --------------------------------------------------------------------------- #
 # What-if: hundreds of configurations, explicitly not validated
 # --------------------------------------------------------------------------- #
 with st.expander("Parameter Sensitivity (Unvalidated)", expanded=False):
-    note(
-        f"<b>Multiple-testing warning: every setting here is a what-if, not the strategy.</b> These controls reach "
-        f"{STRATEGY_TRIALS} strategy configurations across {EVALUATION_SETTINGS} evaluation settings. On five years "
-        "of data some will beat the live rules by luck alone; choosing the best-looking one is fitting this sample. "
-        f"The Deflated Sharpe above already counts all {STRATEGY_TRIALS} as trials.",
-        tone="warn",
+    kit.note(
+        "Every setting here is a what-if, not the strategy.",
+        f"{STRATEGY_TRIALS} configurations across {EVALUATION_SETTINGS} evaluation settings: some will beat the live "
+        "rules by luck alone. The Deflated Sharpe above already counts them all as trials.",
     )
     row = st.columns(4)
     universe_choice = row[0].selectbox("Universe", EVALUATION_OPTIONS["Universe"], key="wi_universe")
@@ -262,56 +331,36 @@ with st.expander("Parameter Sensitivity (Unvalidated)", expanded=False):
         cost_bps=float(cost),
         exclude_backcalculated=not include_backfill,
     )
-    months = None if window == "All" else int(window)
-    trial = load_backtest(what_if, months=months, category=category)
+    trial_months = None if window == "All" else int(window)
+    trial = load_backtest(what_if, months=trial_months, category=category)
     if not trial.ok:
-        note(f"<b>Unavailable.</b> {trial.error}", tone="warn")
+        kit.callout("Unavailable", str(trial.error), "warn")
     else:
         t = trial.stats
-        kpi_grid(
-            [
-                ("Net total return", fmt_pct(t["total_return"]), f"Nifty {fmt_pct(t['benchmark_total_return'])}", ""),
-                ("Net excess", fmt_pct(t["excess_total"]), f"live rules {fmt_pct(stats['excess_total'])}",
-                 tone_of(t["excess_total"])),
-                ("Max drawdown", fmt_pct(t["max_drawdown"]), "", "neg"),
-                ("Avg turnover", fmt_pct(t["avg_turnover"]), "", ""),
-            ]
-        )
-        st.plotly_chart(equity_curve(trial.equity), width="stretch", config=CHART_CONFIG, key="what_if_curve")
+        kit.metric_row([
+            kit.Metric("Net total return", pct(t["total_return"], signed=True),
+                       help=f"Nifty {pct(t['benchmark_total_return'], signed=True)}"),
+            kit.Metric("Net excess", pct(t["excess_total"], signed=True),
+                       help=f"Live rules {pct(stats['excess_total'], signed=True)}"),
+            kit.Metric("Max drawdown", pct(t["max_drawdown"])),
+            kit.Metric("Avg turnover", pct(t["avg_turnover"])),
+        ], key="ev_what_if")
+        _growth(trial.equity, "what_if_curve")
 
     if st.toggle("Also test six score specifications", value=False, key="wi_scores"):
-        grid = load_sensitivity(what_if, months=months, category=category)
-        if grid.empty:
-            note("Not enough history to test alternative score specifications.")
+        specs = load_sensitivity(what_if, months=trial_months, category=category)
+        if specs.empty:
+            kit.caption("Not enough history to test alternative score specifications.")
         else:
-            show_table(
-                grid.rename(columns={"weighting": "Score specification", "total_return": "Net total",
-                                     "excess": "Net excess", "max_drawdown": "Max DD", "hit_rate": "Hit rate",
-                                     "turnover": "Turnover"}),
-                hide_index=True,
-                width="stretch",
-                column_config={c: st.column_config.NumberColumn(format="percent")
-                               for c in ("Net total", "Net excess", "Max DD", "Hit rate", "Turnover")},
-            )
-            spread = float(grid["excess"].max() - grid["excess"].min())
-            note(
-                f"<b>The score specification moves the answer by {spread:.0%}.</b> That spread is the parameter, not "
-                "the strategy. The live rules weight the four segments equally because that assumes nothing about "
-                "which horizon predicts best.",
-                tone="warn",
-            )
-
-section("How to read this")
-note(
-    "<b>Method.</b> At every month-end close the same <code>construct_target_portfolio</code> that builds the "
-    "Portfolio page decides the holdings from prices up to that close. Trades fill at the next session's close and "
-    f"pay {live_config.cost_bps_per_side:g} bps per side on the weight traded. Cash earns what the liquid fund's NAV "
-    f"earned between fills ({live_config.risk_free_rate_annual:.1%} before its history). Only completed months count."
-)
-note(
-    "<b>What this is not.</b> Tax, an ETF's premium to NAV and impact on thin funds are not modelled. These are index "
-    "levels; a fund lags by its tracking difference. Funds that launched and later closed are absent. The universe was "
-    "chosen in 2026 and several indices launched inside the window with back-calculated history. Treat this as a check "
-    "on the rules, not as evidence of an edge.",
-    tone="warn",
-)
+            render_saas_table(pd.DataFrame({
+                "Score specification": specs["weighting"],
+                "Total Return": specs["total_return"].astype(float),
+                "Alpha": specs["excess"].astype(float),
+                "Max DD": specs["max_drawdown"].astype(float),
+                "Hit rate": specs["hit_rate"].map(pct),
+                "Turnover %": specs["turnover"].astype(float) * 100.0,
+            }))
+            spread = float(specs["excess"].max() - specs["excess"].min())
+            kit.callout(f"The score specification moves the answer by {spread:.0%}.",
+                        "That spread is the parameter, not the strategy. The live rules weight the four segments "
+                        "equally, assuming nothing about which horizon predicts best.", "warn")

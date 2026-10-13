@@ -25,6 +25,12 @@ def _page_text(at) -> str:
     return " ".join(_text(p) for p in parts)
 
 
+def _iframe_text(at) -> str:
+    """Text of every kit table (render_saas_table draws each in an st.iframe), scripts and tags stripped."""
+    pages = [str(f.proto.srcdoc) for f in at.get("iframe")]
+    return " ".join(_text(re.sub(r"<script.*?</script>", "", p, flags=re.S)) for p in pages if "saas-table" in p)
+
+
 def _render(page_file: str):
     from streamlit.testing.v1 import AppTest
 
@@ -267,14 +273,23 @@ def test_the_screener_table_shows_every_tradeable_exposure_by_rank():
 
 @needs_data
 def test_the_evidence_page_leads_with_the_live_rules_net_of_costs():
+    """Paresh's Backtest layout: readings, growth, calendar, then this strategy's own robustness cards."""
     at = _render("3_Evidence.py")
-    text = " ".join(_text(m.value) for m in at.markdown)
-    for card in ("Net CAGR", "Net total return", "Max drawdown", "Net excess vs Nifty", "Deflated Sharpe"):
+    assert not at.exception, [e.message for e in at.exception]
+    text = _page_text(at)
+    assert "Tested" in text
+    for reading in ("Net CAGR", "Net total return", "Max drawdown", "Net excess vs Nifty", "Deflated Sharpe"):
+        assert reading in text, reading
+    for card in ("Growth of ₹100", "Calendar returns", "With and without back-calculated history",
+                 "Every 12-month window", "Early versus recent", "Month by month"):
         assert card in text, card
     assert "Parameter Sensitivity (Unvalidated)" in [e.label for e in at.expander]
     assert any(t.label == "Include back-calculated index history" for t in at.toggle)
-    comparison = at.dataframe[0].value
-    assert set(comparison["Back-calculated history"]) == {"Included", "Excluded"}
+    tables = _iframe_text(at)
+    assert "With back-calculated history" in tables and "Without back-calculated history" in tables
+    assert not re.search(r"\b(None|nan|NaT)\b", tables), "a missing value prints as —"
+    at.button_group(key="ev_view").set_value("Method").run()
+    assert not at.exception and "Deflated Sharpe" in _page_text(at)
 
 
 @needs_data
@@ -305,20 +320,40 @@ def test_choosing_an_exposure_in_the_screener_search_opens_its_page():
 @needs_data
 def test_the_exposure_page_sizes_a_position_from_the_book_slider():
     at = _render("4_Exposure.py")
+    assert not at.exception, [e.message for e in at.exception]
+    assert [s.key for s in at.selectbox][0] == "detail_exposure", "the Screener opens an exposure through this key"
     slider = next(s for s in at.slider if s.label == "Book size (₹ lakh)")
     assert (slider.min, slider.max) == (10, 100)
-    text = " ".join(_text(m.value) for m in at.markdown)
-    assert "Implementation matrix" in text and "Position sizing" in text
+    text = _page_text(at)
+    for card in ("Index level & drawdown", "Relative strength vs Nifty 50", "Volatility", "Implementation matrix",
+                 "Position sizing"):
+        assert card in text, card
+    assert not re.search(r"\b(None|nan|NaT)\b", _iframe_text(at)), "a missing value prints as —"
     slider.set_value(100).run()
     assert not at.exception
     assert at.session_state["book_size"] == 10_000_000
 
 
 @needs_data
+def test_the_data_health_page_reads_like_the_paresh_breadth_page():
+    at = _render("5_Data_Health.py")
+    assert not at.exception, [e.message for e in at.exception]
+    text = _page_text(at)
+    for reading in ("Freshness", "Decision-grade", "Benchmark", "Fund histories", "Missing values", "Execution alerts"):
+        assert reading in text, reading
+    for card in ("Checks", "Sources", "Launch dates & backfill", "Liquid fund", "Data lineage"):
+        assert card in text, card
+    assert not re.search(r"\b(None|nan|NaT)\b", _iframe_text(at)), "a missing value prints as —"
+
+
+@needs_data
 def test_the_method_worked_example_reproduces_the_live_score():
     at = _render("6_Method.py")
-    text = " ".join(_text(m.value) for m in at.markdown)
-    assert "identical to the score the portfolio used" in text
+    assert not at.exception, [e.message for e in at.exception]
+    assert at.button_group(key="method_nav").options[2] == "Worked example"
+    at.button_group(key="method_nav").set_value("Worked example").run()
+    assert not at.exception, [e.message for e in at.exception]
+    assert "identical to the score the portfolio used" in _page_text(at)
     assert any(r"S_{\text{" in latex.value for latex in at.get("latex"))
 
 
