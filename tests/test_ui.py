@@ -219,7 +219,7 @@ def test_the_rankings_filter_counts_come_from_the_data():
     assert f"Sectors {counts['sector']}" in presets and f"Themes {counts['thematic']}" in presets
     assert at.session_state["rank_quick_pills"] == "Tradeable"
     assert [list(g.options) for g in at.button_group[1:]] == [
-        ["Sector", "Theme"], ["Rank", "Rank Δ", "1M", "3M", "6M", "12M", "Max DD"], ["Absolute", "vs Nifty 50"]]
+        ["Sector", "Theme"], ["Rank", "1M Δ", "1M", "3M", "6M", "12M", "Max DD 3M"], ["Absolute", "vs Nifty 50"]]
     assert at.selectbox[0].placeholder == "Search exposure or index"
     assert [e.label for e in at.expander] == ["RRG view"]
     from app.components.screener import PRESETS
@@ -228,25 +228,39 @@ def test_the_rankings_filter_counts_come_from_the_data():
         at.button_group(key="rank_quick_pills").set_value(preset).run()
         assert not at.exception, preset
     at.button_group(key="rank_basis").set_value("vs Nifty 50").run()
-    at.button_group(key="rank_sort_by").set_value("Max DD").run()
+    at.button_group(key="rank_sort_by").set_value("Max DD 3M").run()
     assert not at.exception
 
 
 @needs_data
 def test_the_screener_table_shows_every_tradeable_exposure_by_rank():
+    """The default view numbers the tradeable exposures 1, 2, 3 … with 1M Δ and 3M Δ from the decision chain."""
     from app.components import screener as scr
-    from app.data import current_regime, load_decisions, load_index_panel, vehicle_frame
+    from app.data import (
+        current_regime,
+        load_backtest,
+        load_decisions,
+        load_index_panel,
+        vehicle_frame,
+    )
     from app.kit.screener_table import table_html
 
     decisions = load_decisions()
     panel, _ = load_index_panel()
     regime = current_regime()
+    chain = load_backtest().decisions
     table = scr.display_frame(decisions, panel.ffill().iloc[-1], scr.fund_counts(vehicle_frame(), panel.index.max()),
-                              regime.cash_12m if regime else None)
-    view = scr.sort_frame(table[decisions["tradeable"].astype(bool)], "Rank")
+                              regime.cash_12m if regime else None, ranks_1m=scr.past_ranks(chain, 1),
+                              ranks_3m=scr.past_ranks(chain, 3), drawdown_3m=scr.max_drawdown(panel),
+                              portfolio_ranked=True)
+    tradeable = decisions["tradeable"].astype(bool)
+    view = scr.sort_frame(table[tradeable], "Rank")
+    assert view["Rank"].tolist() == list(range(1, int(tradeable.sum()) + 1))
+    # The last rebalance is the chain's last decision, so 1M Δ agrees with decision_rank.
+    assert (view["1M rank"] == decisions.loc[view.index, "decision_rank"]).all()
+    assert view["3M Δ"].notna().sum() > 0 and view["Max DD 3M"].le(0).all()
     markup = table_html(view, panel)
-    assert markup.count("<tr data-stock=") == int(decisions["tradeable"].sum())
-    assert view["Rank"].is_monotonic_increasing
+    assert markup.count("<tr data-stock=") == int(tradeable.sum())
     body = markup[markup.index("<tbody>"):markup.index("</tbody>")]
     assert "None" not in body and ">nan" not in body
 
