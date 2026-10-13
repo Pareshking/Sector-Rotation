@@ -43,11 +43,17 @@ def page_head(title: str, sub: str, *, actions: bool = False):
                            key=f"pg_actions_{_slug(title)}")
 
 
+def _name_class(value: str) -> str:
+    """A tile value that is a name (an industry), not a figure, reads smaller."""
+    return " ms-name" if sum(c.isalpha() for c in value) > 8 else ""
+
+
 def readings(tiles: list[Reading], label: str) -> None:
     """The strip of big figures under the header."""
     cells = "".join(
         f'<div class="ms-tile"><span class="ms-k">{html.escape(t.label)}</span>'
-        f'<span class="ms-v {t.tone}">{html.escape(t.value)}</span>'
+        f'<span class="ms-v {t.tone}{_name_class(t.value)}" title="{html.escape(t.value)}">'
+        f'{html.escape(t.value)}</span>'
         + (f'<span class="ms-s">{html.escape(t.note)}</span>' if t.note else "")
         + "</div>"
         for t in tiles
