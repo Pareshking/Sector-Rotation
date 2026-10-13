@@ -1,4 +1,4 @@
-"""The app's six pages: one definition for the page list, the routes and the phone nav.
+"""The app's seven pages: one definition for the page list, the routes and the phone nav.
 
 ``app/streamlit_app.py`` builds ``st.navigation`` from ``PAGES`` and renders
 ``mobile_nav`` from the same list, so the two can never disagree about what
@@ -27,6 +27,7 @@ class PageSpec:
 PAGES: tuple[PageSpec, ...] = (
     PageSpec("2_Rankings.py", "Screener", "Screener", None, default=True),
     PageSpec("1_Portfolio.py", "Portfolio", "Portfolio", None),
+    PageSpec("7_Actions.py", "Actions", "Actions", None),
     PageSpec("4_Exposure.py", "Exposure", "Exposure", None),
     PageSpec("3_Evidence.py", "Evidence", "Evidence", None),
     PageSpec("5_Data_Health.py", "Data Health", "Data_Health", None),
@@ -34,7 +35,7 @@ PAGES: tuple[PageSpec, ...] = (
 )
 
 # The ☰ menu's sections on a phone, by index into PAGES.
-GROUPS = {"Research": [0, 1, 2], "Monitoring": [3, 4], "System": [5]}
+GROUPS = {"Research": [0, 1, 2, 3], "Monitoring": [4, 5], "System": [6]}
 
 # The default page is served at the root. Streamlit does not route a default
 # page's url_path, so linking to "/Portfolio" would answer "Page not found".

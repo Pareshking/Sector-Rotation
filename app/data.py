@@ -133,6 +133,39 @@ def load_portfolio():
     return _portfolio(_stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet"))
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
+def _preview(prior_json: str, modified_ns: int = 0):
+    del modified_ns
+    import json
+
+    from src.portfolio.construct import construct_target_portfolio
+
+    panel, _ = load_index_panel()
+    if panel.empty:
+        return None
+    return construct_target_portfolio(
+        current_date=pd.Timestamp(panel.index.max()),
+        price_history=panel,
+        universe_metadata=universe_metadata(),
+        prior_weights=json.loads(prior_json),
+        config=strategy_config(),
+        cash_nav=load_cash_nav(),
+    )
+
+
+def load_preview(prior_weights: dict[str, float]):
+    """The rebalance the strategy would strike at the latest close, from ``prior_weights``.
+
+    The strategy's own ``construct_target_portfolio``, unchanged: at a month-end
+    close with the previous decision as the prior, it is that month's decision.
+    Bounded, because every set of typed holdings is a separate entry.
+    """
+    import json
+
+    prior = json.dumps({str(k): float(v) for k, v in sorted(prior_weights.items())})
+    return _preview(prior, _stamp("index_prices.parquet", "cash_nav.parquet", "summary_rankings.parquet"))
+
+
 @st.cache_data(show_spinner=False)
 def _decisions(modified_ns: int = 0) -> pd.DataFrame:
     del modified_ns

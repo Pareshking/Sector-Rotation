@@ -1,4 +1,4 @@
-"""The six-page app: structure, routes, and what each page must answer."""
+"""The seven-page app: structure, routes, and what each page must answer."""
 
 import re
 from html import unescape
@@ -34,18 +34,21 @@ def _render(page_file: str):
 # --------------------------------------------------------------------------- #
 # Structure and routes
 # --------------------------------------------------------------------------- #
-def test_the_app_has_exactly_six_pages_in_order():
-    """The Screener is home, as in the Paresh app."""
-    assert [p.title for p in PAGES] == ["Screener", "Portfolio", "Exposure", "Evidence", "Data Health", "Method"]
+def test_the_app_has_exactly_seven_pages_in_order():
+    """The Screener is home and Actions follows Portfolio, as in the Paresh app."""
+    assert [p.title for p in PAGES] == [
+        "Screener", "Portfolio", "Actions", "Exposure", "Evidence", "Data Health", "Method"
+    ]
     assert [p.file for p in PAGES] == [
-        "2_Rankings.py", "1_Portfolio.py", "4_Exposure.py", "3_Evidence.py", "5_Data_Health.py", "6_Method.py"
+        "2_Rankings.py", "1_Portfolio.py", "7_Actions.py", "4_Exposure.py", "3_Evidence.py", "5_Data_Health.py",
+        "6_Method.py",
     ]
     assert sum(p.default for p in PAGES) == 1 and PAGES[0].default
     assert len({p.url_path for p in PAGES}) == len(PAGES)
     assert all(p.icon is None for p in PAGES), "the header links are text, as in the Paresh app"
 
 
-def test_the_views_folder_holds_only_the_six_pages():
+def test_the_views_folder_holds_only_the_seven_pages():
     """The merged and renamed pages (Overview, Sectors, Themes, Backtest...) are gone."""
     assert sorted(p.name for p in VIEWS.glob("*.py") if p.name != "__init__.py") == sorted(p.file for p in PAGES)
 
@@ -61,8 +64,15 @@ def test_every_link_resolves_and_the_default_page_is_at_the_root():
     assert HOME_PATH == "Screener"
     assert nav_href("Screener") == "/"
     assert [nav_href(p.url_path) for p in PAGES[1:]] == [
-        "/Portfolio", "/Exposure", "/Evidence", "/Data_Health", "/Method"
+        "/Portfolio", "/Actions", "/Exposure", "/Evidence", "/Data_Health", "/Method"
     ]
+
+
+def test_the_phone_menu_groups_every_page_once_with_actions_under_research():
+    from app.components.navigation import GROUPS
+
+    assert sorted(i for indices in GROUPS.values() for i in indices) == list(range(len(PAGES)))
+    assert [PAGES[i].title for i in GROUPS["Research"]] == ["Screener", "Portfolio", "Actions", "Exposure"]
 
 
 def test_the_brand_links_home_through_the_header():
@@ -158,6 +168,27 @@ def test_the_portfolio_page_is_the_model_book_dashboard():
         assert card in text, card
     assert [p.options for p in at.get("button_group")][:2] == [["All", "Winners", "Losers", "Open"],
                                                                 ["All", "Buy", "Sell", "Hold"]]
+
+
+@needs_data
+def test_the_actions_page_is_the_paresh_layout_for_the_book_and_typed_holdings():
+    """Readings, then Sell, Buy and Hold cards and the ranked list; typed ETF symbols map to exposures."""
+    at = _render("7_Actions.py")
+    assert not at.exception, [e.message for e in at.exception]
+    text = _page_text(at)
+    assert "Next rebalance if prices hold. Checked" in text
+    for part in ("Sell", "Buy", "Hold", "Next rebalance", "sessions away · fills"):
+        assert part in text, part
+    assert [p.options for p in at.get("button_group")][0] == ["Model book", "My holdings"]
+    assert "Buy candidates · the ranked list" in [e.label for e in at.expander]
+    assert any(n.value == 2_000_000 for n in at.number_input), "the Kite basket starts at the ₹20 lakh book"
+
+    at.button_group[0].set_value("My holdings").run()
+    at.text_input(key="xw_text").set_value("PHARMABEES 22, NOTAFUND").run()
+    at.button(key="xw_save").click().run()
+    assert not at.exception, [e.message for e in at.exception]
+    text = _page_text(at)
+    assert "PHARMABEES" in text and "Not ranked" in text and "1 of your symbols is not in the universe." in text
 
 
 @needs_data
