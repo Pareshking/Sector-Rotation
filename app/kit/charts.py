@@ -50,3 +50,54 @@ def render_correlation_heatmap(corr: pd.DataFrame, syms: list[str]) -> None:
         "})();</script></body></html>"
     )
     st.iframe(page, height=height + 8)
+
+
+def render_columns(
+    categories: list[str],
+    values: list[float],
+    colors: list[str],
+    *,
+    height: int = 260,
+    unit: str = "",
+    lines: list[tuple[float, str, str]] | None = None,
+    x_title: str | None = None,
+) -> None:
+    """A Highcharts column chart for a distribution: one bar per category.
+
+    `lines` are vertical markers in category-index units, (position, colour,
+    label), e.g. zero or a median falling between two bins. The tooltip names
+    the category and the value with `unit`.
+    """
+    from app.kit.highcharts_lib import lib, script_json
+
+    if not categories:
+        return
+    data = [{"y": float(v), "color": c} for v, c in zip(values, colors)]
+    marks = [{"value": float(p), "color": c, "width": 1.4, "dashStyle": "ShortDot", "zIndex": 5,
+              "label": {"text": t, "rotation": 0, "y": 12, "style": {"color": c, "fontSize": "11px"}}}
+             for p, c, t in (lines or [])]
+    page = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><style>*{box-sizing:border-box;margin:0}"
+        "html,body{background:transparent;font-family:'Geist',system-ui,sans-serif}</style></head>"
+        "<body><div id='c' style='width:100%;height:" + str(height) + "px'></div><script>"
+        + lib() + "</script><script>(function(){"
+        "const cats=" + script_json(categories) + ", data=" + script_json(data) + ", marks="
+        + script_json(marks) + ", unit=" + script_json(unit) + ", xt=" + script_json(x_title) + ";"
+        "Highcharts.chart('c',{chart:{type:'column',backgroundColor:'transparent',spacing:[8,4,4,4],"
+        "style:{fontFamily:'Geist,system-ui,sans-serif'},animation:false},"
+        "credits:{enabled:false},accessibility:{enabled:false},title:{text:null},legend:{enabled:false},"
+        "exporting:{enabled:false},navigator:{enabled:false},scrollbar:{enabled:false},rangeSelector:{enabled:false},"
+        "xAxis:{categories:cats,lineColor:'#E3E6EB',tickLength:0,plotLines:marks,"
+        "title:{text:xt,style:{color:'#5E6878',fontSize:'11px'}},"
+        "labels:{style:{color:'#5E6878',fontSize:'10px'}}},"
+        "yAxis:{title:{text:null},gridLineColor:'#EDEFF3',allowDecimals:false,"
+        "labels:{style:{color:'#5E6878',fontSize:'11px'}}},"
+        "tooltip:{useHTML:true,backgroundColor:'rgba(15,23,42,.94)',borderWidth:0,shadow:false,"
+        "style:{color:'#fff',fontSize:'12px'},"
+        "formatter:function(){const e=v=>String(v).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));"
+        "return '<b>'+e(cats[this.point.index])+'</b><br>'+this.y+(unit?' '+e(unit):'');}},"
+        "plotOptions:{column:{borderWidth:0,borderRadius:2,groupPadding:0.04,pointPadding:0.02,animation:false}},"
+        "series:[{name:'Count',data:data}]});"
+        "})();</script></body></html>"
+    )
+    st.iframe(page, height=height + 8)
